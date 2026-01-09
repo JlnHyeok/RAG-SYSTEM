@@ -1,10 +1,12 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi import WebSocket, WebSocketDisconnect
 from contextlib import asynccontextmanager
 import logging
 
 from app.core.config import settings
 from app.core.rag_engine import rag_engine
+from app.core.websocket_manager import progress_websocket
 from app.api.v1 import health, query, documents
 
 # 로깅 설정
@@ -70,9 +72,29 @@ app.add_middleware(
 )
 
 # API 라우터 등록
-app.include_router(health.router, prefix="/health", tags=["Health"])
-app.include_router(query.router, prefix="/api/v1", tags=["Query"])
+app.include_router(health.router, prefix="/api/v1", tags=["Health"])
+app.include_router(query.router, prefix="/api/v1", tags=["Query"])  
 app.include_router(documents.router, prefix="/api/v1", tags=["Documents"])
+
+# WebSocket 엔드포인트
+@app.websocket("/ws/progress/{document_id}")
+async def websocket_progress(websocket: WebSocket, document_id: str):
+    """문서 처리 진행률을 실시간으로 스트리밍"""
+    await progress_websocket.connect(websocket, document_id)
+    
+    try:
+        while True:
+            # 클라이언트로부터 메시지 대기 (연결 유지)
+            data = await websocket.receive_text()
+            # 핑/퐁 메시지 처리 등
+            if data == "ping":
+                await websocket.send_text("pong")
+                
+    except WebSocketDisconnect:
+        await progress_websocket.disconnect(websocket, document_id)
+    except Exception as e:
+        logger.error(f"WebSocket 오류: {e}")
+        await progress_websocket.disconnect(websocket, document_id)
 
 
 @app.get("/")

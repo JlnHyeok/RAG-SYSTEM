@@ -53,7 +53,7 @@ class Settings(BaseSettings):
     LOG_FORMAT: str = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
     
     class Config:
-        env_file = ".env"
+        env_file = "/Users/jinhyeokheo/Roylabs/Project/rag-system/agent/.env"
         env_file_encoding = "utf-8"
 
 

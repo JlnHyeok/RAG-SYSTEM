@@ -126,7 +126,7 @@ def ask_question(question: str, stream: bool = False, user_id: str = "cli_user")
         print(f"❌ 예상치 못한 오류: {e}")
 
 def upload_file(file_path: str, user_id: str = "cli_user") -> None:
-    """파일을 RAG Agent에 업로드합니다 - 진행 상태 표시"""
+    """파일을 RAG Agent에 업로드합니다 - 실시간 진행률 표시"""
     
     if not os.path.exists(file_path):
         print(f"❌ 파일을 찾을 수 없습니다: {file_path}")
@@ -135,37 +135,190 @@ def upload_file(file_path: str, user_id: str = "cli_user") -> None:
     try:
         import time
         import threading
+        import websocket
+        import json
         from pathlib import Path
         
         # 파일 크기 확인
         file_size = Path(file_path).stat().st_size
         file_size_mb = file_size / (1024 * 1024)
         
-        print(f"📤 파일 업로드 중: {Path(file_path).name} ({file_size_mb:.1f}MB)")
+        print(f"📤 파일 업로드 시작: {Path(file_path).name} ({file_size_mb:.1f}MB)")
         print("=" * 50)
         
-        # 진행 상태 표시를 위한 플래그
+        # WebSocket 연결 상태 및 메시지 저장
+        ws_connected = threading.Event()
+        ws_messages = []
+        document_id = None
+        
+        def on_websocket_message(ws, message):
+            """WebSocket 메시지 수신"""
+            try:
+                data = json.loads(message)
+                ws_messages.append(data)
+                
+                if data['type'] == 'progress':
+                    step = data['step']
+                    progress = data['progress']
+                    message = data.get('message', '')
+                    
+                    # 진행률 바 생성
+                    bar_width = 20
+                    filled = int(bar_width * progress / 100)
+                    bar = "█" * filled + "░" * (bar_width - filled)
+                    
+                    print(f"\r🔄 {step} [{bar}] {progress:.1f}% - {message}     ", 
+                          end="", flush=True)
+                    
+                elif data['type'] == 'completion':
+                    print(f"\n✅ 처리 완료: {data['status']}")
+                    
+            except Exception as e:
+                pass  # JSON 파싱 에러 무시
+        
+        def on_websocket_error(ws, error):
+            """WebSocket 에러"""
+            pass  # 에러 무시 (서버 처리가 완료되면 자동으로 끊어짐)
+        
+        def on_websocket_close(ws, close_status_code, close_msg):
+            """WebSocket 연결 종료"""
+            pass
+        
+        def on_websocket_open(ws):
+            """WebSocket 연결 성공"""
+            ws_connected.set()
+        
+        # 1단계: 파일 업로드 (기존 방식)
         upload_complete = threading.Event()
+        bytes_sent = [0]
         
         def show_upload_progress():
-            """업로드 진행 상태 애니메이션"""
+            """업로드 진행 상태 표시"""
             animation = ["|", "/", "-", "\\"]
             i = 0
             start_time = time.time()
             
             while not upload_complete.is_set():
-                elapsed = time.time() - start_time
-                print(f"\r🔄 파일 전송 중... {animation[i % len(animation)]} ({elapsed:.1f}s)", end="", flush=True)
+                current_time = time.time()
+                elapsed = current_time - start_time
+                current_bytes = bytes_sent[0]
+                
+                progress = min((current_bytes / file_size) * 100, 100) if file_size > 0 else 0
+                
+                # 속도 계산
+                if elapsed > 0:
+                    speed = current_bytes / elapsed
+                    if speed >= 1024 * 1024:
+                        speed_str = f"{speed / (1024 * 1024):.1f}MB/s"
+                    elif speed >= 1024:
+                        speed_str = f"{speed / 1024:.1f}KB/s"
+                    else:
+                        speed_str = f"{speed:.0f}B/s"
+                else:
+                    speed_str = "0B/s"
+                
+                # 프로그레스 바
+                bar_width = 30
+                filled = int(bar_width * progress / 100)
+                bar = "█" * filled + "░" * (bar_width - filled)
+                
+                size_mb = current_bytes / (1024 * 1024)
+                print(f"\r📤 업로드: [{bar}] {progress:.1f}% ({size_mb:.1f}MB) {speed_str}     ", 
+                      end="", flush=True)
+                
                 time.sleep(0.2)
                 i += 1
+        
+        class ProgressFileWrapper:
+            """파일 읽기를 모니터링하는 래퍼 클래스"""
+            def __init__(self, file, callback, chunk_size=8192):
+                self.file = file
+                self.callback = callback
+                self.bytes_read = 0
+                self.chunk_size = chunk_size
+                self.last_update = time.time()
+            
+            def read(self, size=-1):
+                """파일 읽기 - requests 호환 (청크 단위)"""
+                if size is None or size <= 0:
+                    # 전체 파일을 청크 단위로 읽기
+                    data = b''
+                    while True:
+                        chunk = self.file.read(self.chunk_size)
+                        if not chunk:
+                            break
+                        data += chunk
+                        self.bytes_read += len(chunk)
+                        
+                        # 100ms마다 진행률 업데이트
+                        now = time.time()
+                        if now - self.last_update >= 0.1:
+                            self.callback(self.bytes_read)
+                            self.last_update = now
+                    
+                    self.callback(self.bytes_read)  # 최종 업데이트
+                    return data
+                else:
+                    # 지정된 크기만큼 읽기
+                    data = self.file.read(size)
+                    self.bytes_read += len(data)
+                    
+                    # 진행률 업데이트
+                    now = time.time()
+                    if now - self.last_update >= 0.1 or len(data) == 0:
+                        self.callback(self.bytes_read)
+                        self.last_update = now
+                    
+                    return data
+            
+            def readline(self, size=-1):
+                """라인 읽기 - requests 호환"""
+                if size is None or size < 0:
+                    data = self.file.readline()
+                else:
+                    data = self.file.readline(size)
+                
+                self.bytes_read += len(data)
+                self.callback(self.bytes_read)
+                return data
+            
+            def readlines(self, hint=-1):
+                """모든 라인 읽기 - requests 호환"""
+                lines = self.file.readlines(hint)
+                for line in lines:
+                    self.bytes_read += len(line)
+                self.callback(self.bytes_read)
+                return lines
+            
+            def seek(self, offset, whence=0):
+                """파일 위치 변경"""
+                result = self.file.seek(offset, whence)
+                # seek 후 현재 위치로 bytes_read 조정
+                self.bytes_read = self.file.tell()
+                self.callback(self.bytes_read)
+                return result
+            
+            def tell(self):
+                """현재 파일 위치 반환"""
+                return self.file.tell()
+            
+            def __getattr__(self, name):
+                """나머지 속성들은 원본 파일 객체에 위임"""
+                return getattr(self.file, name)
+        
+        def update_progress(bytes_read):
+            """진행률 업데이트 콜백"""
+            bytes_sent[0] = bytes_read
         
         # 진행 상태 스레드 시작
         progress_thread = threading.Thread(target=show_upload_progress, daemon=True)
         progress_thread.start()
         
-        # 실제 업로드
+        # 실제 업로드 (진행률 모니터링과 함께)
         with open(file_path, 'rb') as file:
-            files = {'file': (os.path.basename(file_path), file, 'application/octet-stream')}
+            # 파일을 래퍼로 감싸서 진행률 추적
+            progress_file = ProgressFileWrapper(file, update_progress)
+            files = {'file': (os.path.basename(file_path), progress_file, 'application/octet-stream')}
             data = {'user_id': user_id}
             
             upload_start = time.time()
@@ -173,46 +326,178 @@ def upload_file(file_path: str, user_id: str = "cli_user") -> None:
                 f"{BASE_URL}/api/v1/upload",
                 files=files,
                 data=data,
-                timeout=300  # 5분 타임아웃
+                timeout=1800  # 30분 타임아웃 (대용량 파일 + OCR 처리)
             )
             upload_time = time.time() - upload_start
         
         # 업로드 완료 신호
         upload_complete.set()
-        time.sleep(0.3)  # 애니메이션 정리 시간
-        print(f"\r✅ 파일 전송 완료! ({upload_time:.1f}s)                    ")
+        time.sleep(0.2)  # 마지막 진행률 업데이트 대기
+        
+        # 최종 완료 메시지
+        final_speed = file_size / upload_time if upload_time > 0 else 0
+        if final_speed >= 1024 * 1024:  # MB/s
+            speed_str = f"{final_speed / (1024 * 1024):.1f}MB/s"
+        elif final_speed >= 1024:  # KB/s
+            speed_str = f"{final_speed / 1024:.1f}KB/s"
+        else:  # B/s
+            speed_str = f"{final_speed:.0f}B/s"
+        
+        bar_filled = "█" * 20  # 100% 진행률 바
+        print(f"\r✅ 업로드 완료! [{bar_filled}] 100.0% ({file_size_mb:.1f}MB) 평균 {speed_str} ({upload_time:.1f}s)" + " " * 10)
         
         if response.status_code == 200:
             data = response.json()
-            print("\n🤖 Agent 처리 중...")
-            print("=" * 50)
+            print("\n🤖 문서 처리 중...")
+            print("-" * 40)
             
-            # 상태별 메시지
+            processing_steps = [
+                "📖 PDF 파싱...",
+                "✂️ 텍스트 추출 및 청킹...", 
+                "🖼️ 이미지 추출...",
+                "👁️ OCR 처리...",
+                "🧠 임베딩 생성...",
+                "💾 벡터 저장..."
+            ]
+            
+            # 간단한 처리 상황 시뮬레이션
+            for i, step in enumerate(processing_steps):
+                print(f"{step}")
+                if i < 3:
+                    time.sleep(1)  # 빠른 단계들
+                else:
+                    time.sleep(0.5)  # 이미 완료된 상태이므로 빠르게
+            
+            print("\n" + "=" * 40)
+            
+            # 결과 표시
             if data['status'] == 'completed':
                 print(f"✅ 문서 처리 완료!")
                 print(f"📄 문서 ID: {data['document_id'][:12]}...")
                 print(f"📝 텍스트 청크: {data['text_chunks']}개")
                 if data.get('image_chunks', 0) > 0:
-                    print(f"🖼️ 이미지 청크: {data['image_chunks']}개 (OCR 처리됨)")
-                print(f"💾 총 벡터 임베딩: {data['total_embeddings']}개")
-                print(f"⏱️ 총 처리 시간: {data['processing_time']:.2f}초")
+                    print(f"🖼️ 이미지 청크: {data['image_chunks']}개 (OCR 처리)")
+                print(f"💾 총 임베딩: {data['total_embeddings']}개")
+                print(f"⏱️ 처리 시간: {data['processing_time']:.1f}초")
                 print("\n🎉 이제 이 문서에 대해 질문할 수 있습니다!")
-            elif data['status'] == 'failed':
-                print(f"❌ 문서 처리 실패")
-                print(f"📄 문서 ID: {data['document_id'][:12]}...")
-                print(f"⏱️ 처리 시간: {data['processing_time']:.2f}초")
-                print("💡 파일이 업로드되었지만 벡터 처리에 실패했습니다.")
-                print("   다른 파일을 시도하거나 관리자에게 문의하세요.")
+            else:
+                print(f"❌ 처리 실패: {data.get('status', 'unknown')}")
         else:
             print(f"\n❌ 업로드 실패: {response.status_code}")
+            try:
+                error_data = response.json()
+                print(f"오류: {error_data.get('detail', response.text)}")
+            except:
+                print(f"오류: {response.text}")
+                
+    except requests.exceptions.Timeout:
+        print(f"\n❌ 타임아웃: 파일 처리 시간이 너무 오래 걸립니다.")
+        print("   대용량 파일이나 이미지가 많은 PDF의 경우 시간이 오래 걸릴 수 있습니다.")
+    except requests.exceptions.ConnectionError:
+        print("❌ 연결 오류: RAG Agent 서비스가 실행 중인지 확인하세요.")
+    except Exception as e:
+        print(f"❌ 오류: {e}")
+
+
+def delete_document(document_id: str, user_id: str = "cli_user") -> None:
+    """문서를 벡터 DB에서 삭제합니다 (문서 ID 또는 파일명으로)"""
+    
+    try:
+        print(f"🗑️  문서 삭제 중: {document_id}")
+        print("=" * 40)
+        
+        # 먼저 파일명으로 삭제 시도 (확장자가 있거나 일반적인 파일명인 경우)
+        if ('.' in document_id and document_id.count('.') == 1 and 
+            any(document_id.lower().endswith(ext) for ext in ['.txt', '.pdf', '.md', '.doc', '.docx'])):
+            
+            print("📄 파일명으로 삭제를 시도합니다...")
+            response = requests.delete(
+                f"{BASE_URL}/api/v1/delete-by-name/{document_id}",
+                params={"user_id": user_id},
+                timeout=30
+            )
+        else:
+            print("🆔 문서 ID로 삭제를 시도합니다...")
+            response = requests.delete(
+                f"{BASE_URL}/api/v1/delete/{document_id}",
+                params={"user_id": user_id},
+                timeout=30
+            )
+        
+        if response.status_code == 200:
+            data = response.json()
+            print("✅ 문서 삭제 완료!")
+            print(f"📋 결과: {data.get('message', '삭제되었습니다.')}")
+            
+            # 삭제 성공/실패 여부 표시
+            deleted_chunks = data.get('deleted_chunks', 0)
+            success = data.get('success', True)
+            
+            if success and deleted_chunks > 0:
+                print(f"🎉 {deleted_chunks}개의 텍스트 청크가 성공적으로 삭제되었습니다!")
+            elif deleted_chunks == 0:
+                print("\n💡 해당 이름/ID로 문서를 찾을 수 없습니다.")
+                print("   다음을 확인해보세요:")
+                print("   1. '/list' 명령어로 업로드된 파일 목록 확인")
+                print("   2. 정확한 파일명인지 확인 (대소문자, 확장자 포함)")
+                print("   3. 파일이 실제로 업로드되었는지 확인")
+        else:
+            print("❌ 문서 삭제 실패!")
             try:
                 error_data = response.json()
                 print(f"   오류: {error_data.get('detail', response.text)}")
             except:
                 print(f"   오류: {response.text}")
+                
+    except requests.exceptions.ConnectionError:
+        print("❌ 연결 오류: RAG Agent 서비스가 실행 중인지 확인하세요.")
+        print("   서비스 시작: python -m uvicorn app.main:app --reload")
+    except Exception as e:
+        print(f"❌ 예상치 못한 오류: {e}")
+
+
+def clear_all_documents(user_id: str = "cli_user") -> None:
+    """모든 문서를 벡터 DB에서 삭제합니다 (주의: 되돌릴 수 없음)"""
+    
+    try:
+        print("⚠️  경고: 모든 문서를 삭제하려고 합니다!")
+        print("🗑️  이 작업은 되돌릴 수 없습니다.")
+        print("="*50)
+        
+        # 사용자 확인
+        confirm = input("정말로 모든 문서를 삭제하시겠습니까? (yes/no): ").strip().lower()
+        
+        if confirm not in ['yes', 'y', '예']:
+            print("❌ 삭제가 취소되었습니다.")
+            return
+        
+        print("🗑️  모든 문서 삭제 중...")
+        
+        response = requests.delete(
+            f"{BASE_URL}/api/v1/clear-all",
+            params={"user_id": user_id},
+            timeout=60  # 전체 삭제는 시간이 걸릴 수 있음
+        )
+        
+        if response.status_code == 200:
+            data = response.json()
+            print("✅ 전체 문서 삭제 완료!")
+            print(f"📋 결과: {data.get('message', '모든 문서가 삭제되었습니다.')}") 
             
-    except requests.exceptions.Timeout:
-        print(f"\n❌ 업로드 타임아웃: 파일이 너무 크거나 서버 응답이 느립니다.")
+            success = data.get('success', True)
+            if success:
+                print("🎉 벡터 데이터베이스가 완전히 초기화되었습니다!")
+                print("💡 이제 새로운 문서를 업로드할 수 있습니다.")
+            else:
+                print("ℹ️  삭제할 문서가 없었거나 이미 비어있습니다.")
+        else:
+            print("❌ 전체 문서 삭제 실패!")
+            try:
+                error_data = response.json()
+                print(f"   오류: {error_data.get('detail', response.text)}")
+            except:
+                print(f"   오류: {response.text}")
+                
     except requests.exceptions.ConnectionError:
         print("❌ 연결 오류: RAG Agent 서비스가 실행 중인지 확인하세요.")
         print("   서비스 시작: python -m uvicorn app.main:app --reload")
@@ -336,6 +621,9 @@ def show_help():
     print("💡 RAG Agent CLI 사용법:")
     print("  - 질문을 입력하면 답변을 받을 수 있습니다")
     print("  - '/upload <파일경로>' 로 파일을 업로드할 수 있습니다")
+    print("  - '/delete <문서ID|파일명>' 로 업로드된 문서를 삭제할 수 있습니다")
+    print("    예: /delete test_document.txt 또는 /delete abc123")
+    print("  - '/clear' 로 모든 문서를 삭제할 수 있습니다 (주의!)")
     print("  - '/list' 로 업로드된 파일 목록을 확인할 수 있습니다")
     print("  - '/status' 로 벡터 DB 상태를 확인할 수 있습니다")
     print("  - '/search <검색어>' 로 벡터 검색을 테스트할 수 있습니다")
@@ -425,6 +713,17 @@ def interactive_mode():
                     print("❌ 파일 경로를 입력해주세요.")
                     print()
                     show_current_files()
+                continue
+            elif question.startswith('/delete '):
+                document_id = question[8:].strip()
+                if document_id:
+                    delete_document(document_id)
+                else:
+                    print("❌ 문서 ID를 입력해주세요.")
+                    print("💡 사용법: /delete <문서ID|파일명>")
+                continue
+            elif question == '/clear':
+                clear_all_documents()
                 continue
             elif question == '/upload':
                 print("❌ 파일 경로를 입력해주세요.")

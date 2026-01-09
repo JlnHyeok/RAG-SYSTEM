@@ -20,7 +20,9 @@ class GeminiService:
         """Gemini API 초기화"""
         try:
             if not settings.GEMINI_API_KEY:
-                raise ValueError("GEMINI_API_KEY가 설정되지 않았습니다")
+                logger.warning("GEMINI_API_KEY가 설정되지 않음. Gemini 서비스 비활성화")
+                self._initialized = False
+                return
             
             # Gemini API 설정
             genai.configure(api_key=settings.GEMINI_API_KEY)

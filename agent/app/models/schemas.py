@@ -83,3 +83,10 @@ class HealthResponse(BaseModel):
     timestamp: datetime = Field(default_factory=datetime.now)
     models_loaded: Dict[str, Any] = Field(default_factory=dict)  # boolean에서 Any로 변경
     error: Optional[str] = None
+
+
+class DocumentDeleteResponse(BaseModel):
+    """문서 삭제 응답"""
+    message: str
+    deleted_chunks: int = 0
+    success: bool = True

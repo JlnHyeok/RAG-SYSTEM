@@ -10,17 +10,108 @@ from pathlib import Path
 # TOKENIZERS_PARALLELISM 경고 해결
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
+class ProcessingProgress:
+    """문서 처리 진행 상황을 추적하는 클래스"""
+    def __init__(self, document_id: str, filename: str):
+        self.document_id = document_id
+        self.filename = filename
+        self.current_step = ""
+        self.step_progress = 0.0
+        self.total_steps = 6
+        self.current_step_index = 0
+        
+        self.steps = [
+            "📤 파일 업로드",
+            "📖 PDF 파싱", 
+            "✂️ 텍스트 추출 및 청킹",
+            "🖼️ 이미지 추출",
+            "👁️ OCR 처리", 
+            "🧠 임베딩 생성 및 벡터 저장"
+        ]
+        
+    def start_step(self, step_index: int):
+        """단계 시작"""
+        self.current_step_index = step_index
+        self.current_step = self.steps[step_index]
+        self.step_progress = 0.0
+        self._log_progress()
+        self._send_websocket_progress()
+        
+    def update_step_progress(self, progress: float):
+        """현재 단계 진행률 업데이트"""
+        self.step_progress = min(100.0, max(0.0, progress))
+        self._log_progress()
+        self._send_websocket_progress()
+        
+    def complete_step(self):
+        """현재 단계 완료"""
+        self.step_progress = 100.0
+        self._log_progress()
+        self._send_websocket_progress()
+    
+    def _send_websocket_progress(self):
+        """WebSocket으로 진행률 전송 (비동기)"""
+        try:
+            import asyncio
+            from app.core.websocket_manager import progress_websocket
+            
+            # 현재 이벤트 루프가 있는지 확인
+            try:
+                loop = asyncio.get_running_loop()
+                # 백그라운드 태스크로 실행
+                loop.create_task(progress_websocket.send_progress(
+                    self.document_id,
+                    self.current_step,
+                    self.step_progress,
+                    f"{self.current_step_index + 1}/{self.total_steps} - {self.step_progress:.1f}%"
+                ))
+            except RuntimeError:
+                # 이벤트 루프가 없으면 무시
+                pass
+        except Exception as e:
+            # WebSocket 에러는 무시 (로그 출력은 계속)
+            pass
+        
+    def _log_progress(self):
+        """진행 상황을 로그로 출력"""
+        overall_progress = (self.current_step_index + self.step_progress / 100.0) / self.total_steps * 100
+        
+        progress_bar = self._create_progress_bar(self.step_progress)
+        
+        # 터미널과 로그 모두에 출력
+        progress_msg = f"📋 처리 중: {self.filename}"
+        step_msg = f"🔄 {self.current_step}"
+        step_progress_msg = f"📊 단계 진행률: {progress_bar} {self.step_progress:.1f}%"
+        overall_progress_msg = f"📈 전체 진행률: {overall_progress:.1f}% ({self.current_step_index + 1}/{self.total_steps})"
+        separator = "=" * 70
+        
+        # 터미널 실시간 출력
+        print(f"\n{progress_msg}", flush=True)
+        print(step_msg, flush=True)
+        print(step_progress_msg, flush=True)
+        print(overall_progress_msg, flush=True)
+        print(separator, flush=True)
+        
+        # 로그 파일에도 기록
+        logger.info(f"\n{progress_msg}")
+        logger.info(step_msg)
+        logger.info(step_progress_msg)
+        logger.info(overall_progress_msg)
+        logger.info(separator)
+        
+    def _create_progress_bar(self, progress: float, width: int = 30) -> str:
+        """진행률 바 생성"""
+        filled = int(width * progress / 100)
+        bar = "█" * filled + "░" * (width - filled)
+        return f"[{bar}]"
+
 from app.core.document_processor import document_processor
 from app.core.vector_store import vector_store
-from app.models.schemas import ProcessingResult, DocumentUploadResponse
+from app.models.schemas import ProcessingResult, DocumentUploadResponse, DocumentDeleteResponse
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
-
-# 업로드 디렉토리 설정
-UPLOAD_DIR = Path("uploads")
-UPLOAD_DIR.mkdir(exist_ok=True)
 
 # 문서 처리기 (전역 인스턴스)
 processor = None
@@ -57,21 +148,31 @@ async def upload_document(
         # 고유 문서 ID 생성
         file_hash = hashlib.md5(f"{user_id}_{file.filename}_{time.time()}".encode()).hexdigest()
         
+        # 진행 상황 추적 시작
+        progress = ProcessingProgress(file_hash, file.filename)
+        progress.start_step(0)  # 파일 업로드
+        
         # 파일 내용을 메모리에서 직접 읽기
         file_content = await file.read()
+        progress.complete_step()
         
-        logger.info(f"파일 업로드 시작: {file.filename} (크기: {len(file_content)} bytes, 사용자: {user_id})")
+        print(f"\n✅ 파일 업로드 완료: {file.filename} (크기: {len(file_content):,} bytes)", flush=True)
+        logger.info(f"파일 업로드 완료: {file.filename} (크기: {len(file_content)} bytes, 사용자: {user_id})")
         
         # 메모리에서 직접 문서 처리 및 벡터 DB 저장
+        print(f"\n🚀 문서 처리 시작: {file.filename}", flush=True)
+        logger.info(f"문서 처리 시작: {file.filename}")
         try:
             processing_result = await _process_and_store_document_from_memory(
                 file_content=file_content,
                 file_extension=file_extension,
                 user_id=user_id,
                 document_id=file_hash,
-                original_filename=file.filename
+                original_filename=file.filename,
+                progress=progress
             )
             
+            print(f"\n✅ 문서 처리 및 벡터 저장 완료: {file.filename}", flush=True)
             logger.info(f"문서 처리 및 벡터 저장 완료: {file.filename}")
             
             return DocumentUploadResponse(
@@ -192,7 +293,8 @@ async def _process_and_store_document_from_memory(
     file_extension: str,
     user_id: str, 
     document_id: str, 
-    original_filename: str
+    original_filename: str,
+    progress: ProcessingProgress
 ) -> Dict[str, Any]:
     """메모리의 파일 내용을 직접 처리하고 Qdrant 벡터 DB에 저장"""
     from app.core.embedding_manager import embedding_manager
@@ -201,9 +303,18 @@ async def _process_and_store_document_from_memory(
     from datetime import datetime
     
     try:
-        # 임베딩 매니저와 벡터 스토어 초기화
-        await embedding_manager.initialize()
-        await vector_store.initialize()
+        # 이미 초기화된 서비스들 사용
+        from app.core.rag_engine import rag_engine
+        
+        # RAG 엔진이 초기화되어 있는지 확인
+        if not rag_engine._initialized:
+            print("\n🔄 RAG 엔진 초기화 시작...", flush=True)
+            logger.info("RAG 엔진이 초기화되지 않음. 초기화 시작...")
+            await rag_engine.initialize()
+            print("✅ RAG 엔진 초기화 완료!", flush=True)
+        else:
+            print("✅ 이미 초기화된 RAG 엔진 사용", flush=True)
+            logger.info("이미 초기화된 RAG 엔진 사용")
         
         text_chunks = 0
         image_chunks = 0
@@ -221,7 +332,7 @@ async def _process_and_store_document_from_memory(
                     content = file_content.decode('latin-1', errors='ignore')
             
             chunks = await _process_text_content_from_string(
-                content, document_id, original_filename
+                content, document_id, original_filename, rag_engine.embedding_manager
             )
             text_chunks = len(chunks)
             
@@ -230,13 +341,17 @@ async def _process_and_store_document_from_memory(
             import tempfile
             import os
             
+            progress.start_step(1)  # PDF 파싱
+            
             with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as temp_file:
                 temp_file.write(file_content)
                 temp_path = temp_file.name
             
+            progress.complete_step()
+            
             try:
                 chunks, image_count = await _process_pdf_with_images(
-                    temp_path, document_id, original_filename
+                    temp_path, document_id, original_filename, progress, rag_engine.embedding_manager
                 )
                 text_chunks = len([c for c in chunks if c.metadata.get('content_type') == 'text'])
                 image_chunks = len([c for c in chunks if c.metadata.get('content_type') == 'image'])
@@ -250,7 +365,7 @@ async def _process_and_store_document_from_memory(
             try:
                 content = file_content.decode('utf-8', errors='ignore')
                 chunks = await _process_text_content_from_string(
-                    content, document_id, original_filename
+                    content, document_id, original_filename, rag_engine.embedding_manager
                 )
                 text_chunks = len(chunks)
             except Exception as e:
@@ -259,7 +374,13 @@ async def _process_and_store_document_from_memory(
         
         # 벡터 DB에 저장
         if chunks:
-            await vector_store.add_documents(chunks, user_id)
+            progress.start_step(5)  # 벡터 저장
+            progress.update_step_progress(50.0)
+            
+            await rag_engine.vector_store.add_documents(chunks, user_id)
+            
+            progress.complete_step()
+            print(f"\n💾 Qdrant에 {len(chunks):,}개 청크 저장 완료: {original_filename}", flush=True)
             logger.info(f"Qdrant에 {len(chunks)}개 청크 저장 완료: {original_filename}")
         
         return {
@@ -276,10 +397,10 @@ async def _process_and_store_document_from_memory(
 async def _process_text_content_from_string(
     content: str, 
     document_id: str, 
-    original_filename: str
+    original_filename: str,
+    embedding_manager
 ) -> list:
     """문자열 콘텐츠를 청크로 나누고 임베딩 생성 (파일 경로 없이)"""
-    from app.core.embedding_manager import embedding_manager
     from app.models.schemas import DocumentChunk
     import uuid
     from datetime import datetime
@@ -425,10 +546,11 @@ async def _process_text_content(
 async def _process_pdf_with_images(
     file_path: str, 
     document_id: str, 
-    original_filename: str
+    original_filename: str,
+    progress: ProcessingProgress,
+    embedding_manager
 ) -> Tuple[list, int]:
-    """PDF 파일에서 텍스트와 이미지를 모두 처리 (OCR 포함)"""
-    from app.core.embedding_manager import embedding_manager
+    """고급 PDF 처리: 텍스트와 이미지를 모두 처리 (OCR 포함)"""
     from app.core.document_processor import document_processor
     from app.models.schemas import DocumentChunk
     import uuid
@@ -441,9 +563,17 @@ async def _process_pdf_with_images(
     try:
         # PyMuPDF를 사용해서 PDF 열기 (이미지 추출 가능)
         pdf_document = fitz.open(file_path)
+        total_pages = len(pdf_document)
         
-        for page_num in range(len(pdf_document)):
+        progress.start_step(2)  # 텍스트 추출 및 청킹
+        
+        # 텍스트 추출 및 청킹 단계
+        for page_num in range(total_pages):
             page = pdf_document[page_num]
+            
+            # 페이지별 진행률 계산
+            text_progress = (page_num / total_pages) * 100
+            progress.update_step_progress(text_progress)
             
             # 1. 텍스트 추출
             page_text = page.get_text().strip()
@@ -473,58 +603,89 @@ async def _process_pdf_with_images(
                         }
                     )
                     chunks.append(chunk)
+        
+        progress.complete_step()  # 텍스트 추출 완료
+        
+        # 이미지 추출 단계
+        progress.start_step(3)  # 이미지 추출
+        
+        total_images = 0
+        # 전체 이미지 수 계산
+        for page_num in range(total_pages):
+            page = pdf_document[page_num]
+            total_images += len(page.get_images())
+        
+        processed_images = 0
+        
+        # OCR 처리 단계
+        if total_images > 0:
+            progress.complete_step()  # 이미지 추출 완료
+            progress.start_step(4)  # OCR 처리 시작
             
-            # 2. 이미지 추출 및 OCR
-            image_list = page.get_images()
+            for page_num in range(total_pages):
+                page = pdf_document[page_num]
+                image_list = page.get_images()
+                
+                for img_index, img in enumerate(image_list):
+                    try:
+                        # OCR 진행률 계산
+                        ocr_progress = (processed_images / total_images) * 100
+                        progress.update_step_progress(ocr_progress)
+                        
+                        # 이미지 추출
+                        xref = img[0]
+                        pix = fitz.Pixmap(pdf_document, xref)
+                        
+                        if pix.n - pix.alpha < 4:  # GRAY 또는 RGB
+                            # PIL Image로 변환
+                            img_data = pix.tobytes("png")
+                            
+                            # OCR 수행
+                            ocr_text = await _perform_ocr_on_image(img_data)
+                            
+                            if ocr_text and ocr_text.strip():  # 빈 문자열이 아닌 모든 결과 저장
+                                # OCR 결과를 청크로 저장
+                                try:
+                                    embedding = await embedding_manager.embed_text(ocr_text)
+                                    
+                                    chunk = DocumentChunk(
+                                        id=str(uuid.uuid4()),
+                                        content=ocr_text,
+                                        embedding=embedding,
+                                        metadata={
+                                            "document_id": document_id,
+                                            "original_filename": original_filename,
+                                            "page": page_num + 1,
+                                            "image_index": img_index,
+                                            "chunk_index": len(chunks),
+                                            "content_type": "image",
+                                            "ocr_engine": "tesseract",
+                                            "file_type": "pdf",
+                                            "created_at": str(datetime.now())
+                                        }
+                                    )
+                                    chunks.append(chunk)
+                                    image_count += 1
+                                    
+                                    logger.info(f"PDF 이미지 OCR 성공: 페이지 {page_num + 1}, 이미지 {img_index + 1} - {len(ocr_text)} 문자")
+                                except Exception as embed_error:
+                                    logger.warning(f"OCR 텍스트 임베딩 실패: {embed_error}")
+                            else:
+                                logger.debug(f"이미지에서 텍스트 미발견: 페이지 {page_num + 1}, 이미지 {img_index + 1}")
+                        
+                        pix = None
+                        processed_images += 1
+                        
+                    except Exception as e:
+                        logger.warning(f"PDF 이미지 처리 실패 (페이지 {page_num + 1}, 이미지 {img_index + 1}): {e}")
+                        processed_images += 1
+                        continue
             
-            for img_index, img in enumerate(image_list):
-                try:
-                    # 이미지 추출
-                    xref = img[0]
-                    pix = fitz.Pixmap(pdf_document, xref)
-                    
-                    if pix.n - pix.alpha < 4:  # GRAY 또는 RGB
-                        # PIL Image로 변환
-                        img_data = pix.tobytes("png")
-                        
-                        # OCR 수행
-                        ocr_text = await _perform_ocr_on_image(img_data)
-                        
-                        if ocr_text and ocr_text.strip():  # 빈 문자열이 아닌 모든 결과 저장
-                            # OCR 결과를 청크로 저장
-                            try:
-                                embedding = await embedding_manager.embed_text(ocr_text)
-                                
-                                chunk = DocumentChunk(
-                                    id=str(uuid.uuid4()),
-                                    content=ocr_text,
-                                    embedding=embedding,
-                                    metadata={
-                                        "document_id": document_id,
-                                        "original_filename": original_filename,
-                                        "page": page_num + 1,
-                                        "image_index": img_index,
-                                        "chunk_index": len(chunks),
-                                        "content_type": "image",
-                                        "ocr_engine": "tesseract",
-                                        "file_type": "pdf",
-                                        "created_at": str(datetime.now())
-                                    }
-                                )
-                                chunks.append(chunk)
-                                image_count += 1
-                                
-                                logger.info(f"PDF 이미지 OCR 성공: 페이지 {page_num + 1}, 이미지 {img_index + 1} - {len(ocr_text)} 문자")
-                            except Exception as embed_error:
-                                logger.warning(f"OCR 텍스트 임베딩 실패: {embed_error}")
-                        else:
-                            logger.debug(f"이미지에서 텍스트 미발견: 페이지 {page_num + 1}, 이미지 {img_index + 1}")
-                    
-                    pix = None
-                    
-                except Exception as e:
-                    logger.warning(f"PDF 이미지 처리 실패 (페이지 {page_num + 1}, 이미지 {img_index + 1}): {e}")
-                    continue
+            progress.complete_step()  # OCR 처리 완료
+        else:
+            progress.complete_step()  # 이미지 추출 완료 (이미지 없음)
+            progress.start_step(4)  # OCR 단계 건너뛰기
+            progress.complete_step()
         
         pdf_document.close()
         
@@ -651,6 +812,114 @@ async def _delete_document_from_vector_db(collection_name: str, document_id: str
         
     except Exception as e:
         logger.error(f"벡터 DB 삭제 실패: {e}")
+        return 0
+
+
+async def _delete_document_by_filename(collection_name: str, filename: str) -> int:
+    """벡터 DB에서 특정 filename을 가진 모든 점들 삭제"""
+    try:
+        # Qdrant에서 직접 필터링으로 찾기 (더 효율적)
+        from qdrant_client.models import Filter, FieldCondition, MatchValue
+        
+        # 다양한 필터 조건 시도
+        filters_to_try = [
+            # original_filename으로 정확히 매칭
+            Filter(must=[FieldCondition(key="original_filename", match=MatchValue(value=filename))]),
+            # filename으로 정확히 매칭  
+            Filter(must=[FieldCondition(key="filename", match=MatchValue(value=filename))]),
+        ]
+        
+        total_deleted = 0
+        
+        for i, filter_condition in enumerate(filters_to_try):
+            try:
+                logger.info(f"삭제 시도 {i+1}: 필터 조건으로 '{filename}' 검색")
+                
+                # 조건에 맞는 점들 검색
+                search_result = await vector_store.client.scroll(
+                    collection_name=collection_name,
+                    scroll_filter=filter_condition,
+                    limit=10000,
+                    with_payload=True,
+                    with_vectors=False
+                )
+                
+                points_found = search_result[0] if search_result else []
+                logger.info(f"필터 {i+1}로 찾은 점 수: {len(points_found)}")
+                
+                if points_found:
+                    # 점들의 ID 수집
+                    point_ids = [point.id for point in points_found]
+                    
+                    # 실제 삭제 실행
+                    delete_result = await vector_store.client.delete(
+                        collection_name=collection_name,
+                        points_selector={"points": point_ids}
+                    )
+                    
+                    deleted_count = len(point_ids)
+                    total_deleted += deleted_count
+                    
+                    logger.info(f"필터 {i+1}로 {deleted_count}개 점 삭제 완료")
+                    
+                    # 첫 번째 성공한 필터로 삭제됐으면 나머지는 시도하지 않음
+                    if deleted_count > 0:
+                        logger.info(f"'{filename}' 삭제 성공: 총 {total_deleted}개 점 삭제됨")
+                        return total_deleted
+                        
+            except Exception as filter_error:
+                logger.warning(f"필터 {i+1} 삭제 시도 실패: {filter_error}")
+                continue
+        
+        # 필터링으로 안 되면 전체 검색 후 매칭 (fallback)
+        if total_deleted == 0:
+            logger.info("필터링 실패, 전체 검색으로 fallback")
+            
+            from app.core.embedding_manager import embedding_manager
+            await embedding_manager.initialize()
+            
+            # 더미 검색으로 모든 점 가져오기
+            test_embedding = await embedding_manager.embed_text("test")
+            all_docs = await vector_store.search_similar(
+                collection_name=collection_name,
+                query_vector=test_embedding,
+                limit=10000,
+                score_threshold=0.0
+            )
+            
+            logger.info(f"전체 검색으로 {len(all_docs)}개 문서 확인")
+            
+            # filename이 일치하는 점들 찾기
+            points_to_delete = []
+            
+            for doc in all_docs:
+                doc_filename = doc.metadata.get("filename", "")
+                doc_original_filename = doc.metadata.get("original_filename", "")
+                
+                # 단순하고 확실한 매칭
+                if (doc_original_filename == filename or 
+                    doc_filename == filename or
+                    os.path.basename(doc_original_filename) == filename or
+                    os.path.basename(doc_filename) == filename):
+                    
+                    points_to_delete.append(doc.document_id)
+                    logger.info(f"매칭 발견: original='{doc_original_filename}', filename='{doc_filename}'")
+            
+            # 삭제 실행
+            if points_to_delete:
+                await vector_store.client.delete(
+                    collection_name=collection_name,
+                    points_selector={"points": points_to_delete}
+                )
+                total_deleted = len(points_to_delete)
+                logger.info(f"Fallback으로 {total_deleted}개 점 삭제 완료")
+            else:
+                logger.warning(f"'{filename}' 파일을 찾을 수 없음")
+        
+        return total_deleted
+        
+    except Exception as e:
+        logger.error(f"벡터 DB 파일명 기반 삭제 실패: {e}")
         return 0
 
 
@@ -862,7 +1131,7 @@ async def list_documents(user_id: str = "anonymous") -> Dict[str, Any]:
 
 
 @router.delete("/delete/{document_id}")
-async def delete_document(document_id: str, user_id: str = "anonymous") -> Dict[str, str]:
+async def delete_document(document_id: str, user_id: str = "anonymous") -> DocumentDeleteResponse:
     """업로드된 문서 삭제 - 벡터 DB에서만 삭제 (파일 시스템 사용 안함)"""
     try:
         # 벡터 DB에서 문서 삭제
@@ -892,10 +1161,167 @@ async def delete_document(document_id: str, user_id: str = "anonymous") -> Dict[
         
         if deleted_from_vector_db:
             message = f"문서 '{document_id}'가 성공적으로 삭제되었습니다. ({deleted_count}개 청크 삭제됨)"
+            success = True
         else:
             message = f"문서 '{document_id}'를 찾을 수 없어 삭제되지 않았습니다."
+            success = False
             
-        return {"message": message, "deleted_chunks": deleted_count}
+        return DocumentDeleteResponse(
+            message=message, 
+            deleted_chunks=deleted_count,
+            success=success
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"파일 삭제 실패: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"문서 삭제 중 오류가 발생했습니다: {str(e)}"
+        )
+
+
+@router.delete("/clear-all")
+async def clear_all_documents(user_id: str = "anonymous") -> DocumentDeleteResponse:
+    """사용자의 모든 문서를 벡터 DB에서 삭제"""
+    try:
+        deleted_count = 0
+        
+        try:
+            # 벡터 DB 초기화
+            await vector_store.initialize()
+            collection_name = f"documents_{user_id}"
+            
+            # 컬렉션 전체 삭제 시도
+            try:
+                # 컬렉션이 존재하는지 확인
+                import asyncio
+                collections = await asyncio.to_thread(vector_store.client.get_collections)
+                collection_exists = any(col.name == collection_name for col in collections.collections)
+                
+                if collection_exists:
+                    # 컬렉션 삭제
+                    await asyncio.to_thread(vector_store.client.delete_collection, collection_name)
+                    logger.info(f"컬렉션 '{collection_name}' 전체 삭제 완료")
+                    
+                    # 새로운 빈 컬렉션 생성
+                    await vector_store._create_collection(collection_name)
+                    logger.info(f"새로운 빈 컬렉션 '{collection_name}' 생성 완료")
+                    
+                    deleted_count = "전체"  # 전체 삭제를 표시
+                    message = f"사용자 '{user_id}'의 모든 문서가 성공적으로 삭제되었습니다."
+                    success = True
+                else:
+                    message = f"사용자 '{user_id}'의 문서 컬렉션이 존재하지 않습니다."
+                    success = False
+                    
+            except Exception as collection_error:
+                logger.warning(f"컬렉션 삭제 실패, 개별 점 삭제로 전환: {collection_error}")
+                
+                # 컬렉션 삭제가 실패하면 모든 점 개별 삭제
+                from app.core.embedding_manager import embedding_manager
+                await embedding_manager.initialize()
+                
+                # 더미 검색으로 모든 점 가져오기
+                test_embedding = await embedding_manager.embed_text("test")
+                all_docs = await vector_store.search_similar(
+                    collection_name=collection_name,
+                    query_vector=test_embedding,
+                    limit=50000,  # 매우 큰 수
+                    score_threshold=0.0
+                )
+                
+                if all_docs:
+                    # 모든 점의 ID 수집
+                    all_point_ids = [doc.document_id for doc in all_docs]
+                    
+                    # 배치로 삭제 (Qdrant 제한 고려)
+                    batch_size = 1000
+                    total_deleted = 0
+                    
+                    for i in range(0, len(all_point_ids), batch_size):
+                        batch_ids = all_point_ids[i:i + batch_size]
+                        from qdrant_client.models import PointIdsList
+                        await asyncio.to_thread(
+                            vector_store.client.delete,
+                            collection_name=collection_name,
+                            points_selector=PointIdsList(points=batch_ids)
+                        )
+                        total_deleted += len(batch_ids)
+                        logger.info(f"배치 삭제 진행: {total_deleted}/{len(all_point_ids)}")
+                    
+                    deleted_count = total_deleted
+                    message = f"사용자 '{user_id}'의 모든 문서가 성공적으로 삭제되었습니다. ({total_deleted}개 청크 삭제됨)"
+                    success = True
+                else:
+                    message = f"사용자 '{user_id}'의 문서가 이미 비어있습니다."
+                    success = False
+                
+        except Exception as vector_error:
+            logger.error(f"벡터 DB 전체 삭제 실패: {vector_error}")
+            raise HTTPException(
+                status_code=500,
+                detail=f"전체 문서 삭제 중 오류가 발생했습니다: {str(vector_error)}"
+            )
+        
+        return DocumentDeleteResponse(
+            message=message,
+            deleted_chunks=deleted_count if isinstance(deleted_count, int) else 0,
+            success=success
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"전체 파일 삭제 실패: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"전체 문서 삭제 중 오류가 발생했습니다: {str(e)}"
+        )
+
+
+@router.delete("/delete-by-name/{filename}")
+async def delete_document_by_name(filename: str, user_id: str = "anonymous") -> DocumentDeleteResponse:
+    """파일명으로 문서 삭제 - 벡터 DB에서만 삭제"""
+    try:
+        # 벡터 DB에서 해당 파일명을 가진 문서들 검색
+        deleted_from_vector_db = False
+        deleted_count = 0
+        
+        try:
+            # 벡터 DB 초기화
+            await vector_store.initialize()
+            collection_name = f"documents_{user_id}"
+            
+            # filename을 기준으로 삭제
+            deleted_count = await _delete_document_by_filename(collection_name, filename)
+            
+            if deleted_count > 0:
+                deleted_from_vector_db = True
+                logger.info(f"벡터 DB에서 {deleted_count}개 청크 삭제 (파일명: {filename})")
+            else:
+                logger.warning(f"삭제할 파일을 찾을 수 없음: {filename}")
+                
+        except Exception as vector_error:
+            logger.error(f"벡터 DB 삭제 실패: {vector_error}")
+            raise HTTPException(
+                status_code=500,
+                detail=f"문서 삭제 중 오류가 발생했습니다: {str(vector_error)}"
+            )
+        
+        if deleted_from_vector_db:
+            message = f"파일 '{filename}'이 성공적으로 삭제되었습니다. ({deleted_count}개 청크 삭제됨)"
+            success = True
+        else:
+            message = f"파일 '{filename}'을 찾을 수 없어 삭제되지 않았습니다."
+            success = False
+            
+        return DocumentDeleteResponse(
+            message=message, 
+            deleted_chunks=deleted_count,
+            success=success
+        )
         
     except HTTPException:
         raise
