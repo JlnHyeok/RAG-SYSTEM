@@ -27,8 +27,9 @@ class GeminiService:
             # Gemini API 설정
             genai.configure(api_key=settings.GEMINI_API_KEY)
             
-            # 모델 초기화 (최신 모델명 사용)
-            self.model = genai.GenerativeModel('gemini-2.5-flash')
+            # 모델 초기화 (환경변수에서 모델명 가져오기, 없으면 기본값 사용)
+            model_name = settings.GEMINI_MODEL or "gemini-2.0-flash-exp"
+            self.model = genai.GenerativeModel(model_name)
             
             # 연결 테스트 (선택적)
             if test_connection:
@@ -49,7 +50,8 @@ class GeminiService:
                 logger.warning(f"Gemini API 할당량 초과, 기본 설정으로 초기화: {e}")
                 # 기본 설정으로라도 초기화
                 genai.configure(api_key=settings.GEMINI_API_KEY)
-                self.model = genai.GenerativeModel('gemini-2.5-flash')
+                model_name = settings.GEMINI_MODEL or "gemini-2.0-flash-exp"
+                self.model = genai.GenerativeModel(model_name)
                 self._initialized = True
                 logger.info("Gemini API 기본 초기화 완료 (연결 테스트 미실행)")
             else:
@@ -80,10 +82,14 @@ class GeminiService:
         return "quota" in error_str or "429" in error_str
     
     def _create_generation_config(self, max_tokens: int, temperature: float) -> genai.types.GenerationConfig:
-        """일관된 GenerationConfig 생성"""
+        """일관된 GenerationConfig 생성 - 더 완전한 답변을 위한 설정"""
         return genai.types.GenerationConfig(
             max_output_tokens=max_tokens,
-            temperature=temperature
+            temperature=temperature,
+            top_p=0.95,  # 더 다양한 응답을 위해
+            top_k=40,   # 토큰 선택 범위 확장
+            candidate_count=1,  # 하나의 완전한 답변 생성
+            stop_sequences=[]   # 중단 시퀀스 없음으로 완전한 답변 보장
         )
     
     @lru_cache(maxsize=100)
@@ -99,7 +105,7 @@ class GeminiService:
         self,
         question: str,
         context: str,
-        max_tokens: int = 1000,
+        max_tokens: int = 2000,  # 기본값을 1000에서 2000으로 증가
         temperature: float = 0.1
     ) -> str:
         """컨텍스트 기반 답변 생성"""
@@ -177,7 +183,7 @@ class GeminiService:
     
     def _build_rag_prompt(self, question: str, context: str) -> str:
         """RAG용 프롬프트 템플릿 구성"""
-        return f"""당신은 도움이 되는 AI 어시스턴트입니다. 주어진 컨텍스트를 바탕으로 사용자의 질문에 정확하고 유용한 답변을 제공해주세요.
+        return f"""당신은 도움이 되는 AI 어시스턴트입니다. 주어진 컨텍스트를 바탕으로 사용자의 질문에 정확하고 완전한 답변을 제공해주세요.
 
 중요한 규칙:
 1. 컨텍스트에 있는 정보만을 사용해서 답변하세요
@@ -185,13 +191,16 @@ class GeminiService:
 3. 답변은 한국어로 작성하세요
 4. 가능하면 구체적인 근거를 제시하세요
 5. 출처 정보가 있다면 언급해주세요
+6. 답변을 완전히 끝까지 작성하세요 - 중간에 끊지 마세요
+7. 표나 목록이 있다면 모든 항목을 포함하세요
+8. 상세하고 완성된 답변을 제공하세요
 
 컨텍스트:
 {context}
 
 질문: {question}
 
-답변:"""
+답변 (완전하고 상세하게 작성):"""
     
     async def generate_summary(self, text: str, max_length: int = 200) -> str:
         """텍스트 요약 생성"""
@@ -256,19 +265,46 @@ class GeminiService:
             return "답변 생성 중 오류가 발생했습니다. 다시 시도해주세요."
     
     def _get_quota_exceeded_response(self, question: str, context: str) -> str:
-        """할당량 초과 시 기본 답변"""
-        # 컨텍스트가 있으면 기본적인 답변 제공
-        if context and len(context.strip()) > 0:
-            return f"""현재 Gemini API 할당량을 초과했습니다. 
-
-제공된 컨텍스트를 참고하여 답드리겠습니다:
-
-관련 내용:
-{context[:500]}...
-
-위 내용을 참고하여 질문에 대한 답변을 찾아보세요."""
-        else:
+        """할당량 초과 시 컨텍스트 포함 답변"""
+        if not context or len(context.strip()) == 0:
             return "현재 Gemini API 할당량을 초과했습니다. 잠시 후 다시 시도해주세요."
+        
+        # 컨텍스트를 구조화하여 표시
+        context_lines = context.strip().split('\n')
+        formatted_parts = []
+        
+        current_doc = ""
+        current_content = []
+        
+        for line in context_lines:
+            if line.startswith('[문서'):
+                # 이전 문서 저장
+                if current_doc and current_content:
+                    content_text = '\n'.join(current_content).strip()
+                    if content_text:
+                        formatted_parts.append(f"**{current_doc}**\n{content_text}")
+                
+                # 새 문서 시작
+                current_doc = line.strip('[]')
+                current_content = []
+            elif line.strip():
+                current_content.append(line)
+        
+        # 마지막 문서 저장
+        if current_doc and current_content:
+            content_text = '\n'.join(current_content).strip()
+            if content_text:
+                formatted_parts.append(f"**{current_doc}**\n{content_text}")
+        
+        result = "현재 Gemini API 할당량을 초과했습니다.\n\n"
+        result += f"'{question}' 질문과 관련하여 다음 문서 내용을 찾았습니다:\n\n"
+        
+        if formatted_parts:
+            result += "\n\n".join(formatted_parts)
+        else:
+            result += context[:800] + ("..." if len(context) > 800 else "")
+        
+        return result
     
     def _get_intelligent_fallback_response(self, user_message: str, quota_exceeded: bool = False) -> str:
         """지능적인 fallback 응답 생성"""
@@ -331,7 +367,8 @@ class GeminiService:
     def get_service_info(self) -> dict:
         """서비스 정보 반환"""
         return {
-            "service": "Gemini Pro",
+            "service": "Google Gemini",
+            "model": settings.GEMINI_MODEL or "gemini-2.0-flash-exp (default)",
             "initialized": self._initialized,
             "cache_info": self._cached_generate.cache_info()._asdict() if hasattr(self._cached_generate, 'cache_info') else {}
         }

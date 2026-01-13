@@ -19,6 +19,9 @@ class Settings(BaseSettings):
     GEMINI_API_KEY: Optional[str] = None
     OPENAI_API_KEY: Optional[str] = None  # 백업용
     
+    # Gemini 모델 설정
+    GEMINI_MODEL: Optional[str] = None
+    
     # 벡터 DB 설정
     QDRANT_HOST: str = "localhost"
     QDRANT_PORT: int = 6333
@@ -53,7 +56,7 @@ class Settings(BaseSettings):
     LOG_FORMAT: str = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
     
     class Config:
-        env_file = "/Users/jinhyeokheo/Roylabs/Project/rag-system/agent/.env"
+        env_file = ".env"
         env_file_encoding = "utf-8"
 
 

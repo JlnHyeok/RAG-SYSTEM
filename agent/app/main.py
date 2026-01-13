@@ -74,27 +74,36 @@ app.add_middleware(
 # API 라우터 등록
 app.include_router(health.router, prefix="/api/v1", tags=["Health"])
 app.include_router(query.router, prefix="/api/v1", tags=["Query"])  
-app.include_router(documents.router, prefix="/api/v1", tags=["Documents"])
+app.include_router(documents.router, prefix="/api/v1/documents", tags=["Documents"])
 
 # WebSocket 엔드포인트
 @app.websocket("/ws/progress/{document_id}")
 async def websocket_progress(websocket: WebSocket, document_id: str):
     """문서 처리 진행률을 실시간으로 스트리밍"""
-    await progress_websocket.connect(websocket, document_id)
-    
     try:
-        while True:
-            # 클라이언트로부터 메시지 대기 (연결 유지)
-            data = await websocket.receive_text()
-            # 핑/퐁 메시지 처리 등
-            if data == "ping":
-                await websocket.send_text("pong")
+        await progress_websocket.connect(websocket, document_id)
+        logger.info(f"WebSocket 연결됨: {document_id}")
+        
+        try:
+            while True:
+                # 클라이언트로부터 메시지 대기 (연결 유지)
+                data = await websocket.receive_text()
                 
-    except WebSocketDisconnect:
-        await progress_websocket.disconnect(websocket, document_id)
+                # 핀/폁 메시지 처리
+                if data == "ping":
+                    await websocket.send_text("pong")
+                    
+        except WebSocketDisconnect:
+            logger.info(f"WebSocket 연결 해제됨: {document_id}")
+        finally:
+            await progress_websocket.disconnect(websocket, document_id)
+            
     except Exception as e:
         logger.error(f"WebSocket 오류: {e}")
-        await progress_websocket.disconnect(websocket, document_id)
+        try:
+            await progress_websocket.disconnect(websocket, document_id)
+        except:
+            pass
 
 
 @app.get("/")

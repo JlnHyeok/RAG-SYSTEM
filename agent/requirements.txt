@@ -14,6 +14,7 @@ qdrant-client==1.7.0
 
 # OCR 및 이미지 처리
 pytesseract==0.3.10
+Pillow==10.0.1                # 이미지 처리 및 품질 향상
 opencv-python==4.6.0.66
 paddlepaddle>=2.6.0
 paddleocr>=2.7.0
@@ -39,6 +40,10 @@ python-dotenv==1.0.0
 httpx==0.25.2
 aiofiles==23.2.0
 redis==5.0.1
+websocket-client==1.9.0
+
+# CLI 표 표시용
+tabulate==0.9.0
 
 # 개발 도구
 pytest==7.4.3
