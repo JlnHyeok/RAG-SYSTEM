@@ -64,15 +64,12 @@ def interactive_mode():
                 file_path = question[8:].strip()
                 if file_path:
                     print(f"📋 업로드 요청: {file_path}")
-                    print(f"[DEBUG] interactive.py에서 upload_file() 호출 시작")
                     if not os.path.exists(file_path):
                         print(f"❌ 파일을 찾을 수 없습니다: {file_path}")
                         print("💡 현재 디렉토리의 파일들을 확인하세요:")
                         show_current_files()
                     else:
-                        print(f"[DEBUG] 파일 존재 확인 완료, upload_file() 호출")
                         result = upload_file(file_path)
-                        print(f"[DEBUG] upload_file() 결과: {result}")
                 else:
                     print("❌ 파일 경로를 입력해주세요.")
                     print()

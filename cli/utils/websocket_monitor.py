@@ -90,7 +90,7 @@ def await_processing_completion(document_id: str, timeout: int = 600) -> bool:
 
     def on_close(ws, close_status_code, close_msg):
         nonlocal websocket_working
-        print(f"📡 WebSocket 연결 종료", flush=True)
+        # print(f"📡 WebSocket 연결 종료", flush=True)  # 사용자 요청으로 비활성화 (프롬프트 간섭 방지)
         websocket_working = False
 
     def on_open(ws):

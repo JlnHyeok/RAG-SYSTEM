@@ -35,6 +35,7 @@ class QueryRequest(BaseModel):
 class SearchResult(BaseModel):
     """검색 결과 아이템"""
     document_id: str
+    chunk_id: Optional[str] = None  # 청크 고유 ID (중복 제거용)
     content: str
     score: float
     metadata: Dict[str, Any] = Field(default_factory=dict)
@@ -60,7 +61,9 @@ class DocumentUploadRequest(BaseModel):
 class DocumentUploadResponse(BaseModel):
     """문서 업로드 응답"""
     document_id: str
-    status: ProcessingStatus
+    filename: Optional[str] = None
+    status: Union[ProcessingStatus, str] = ProcessingStatus.PENDING
+    message: Optional[str] = None
     text_chunks: int = 0
     image_chunks: int = 0
     total_embeddings: int = 0

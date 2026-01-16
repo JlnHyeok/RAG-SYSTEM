@@ -7,6 +7,17 @@ import sys
 import argparse
 from pathlib import Path
 
+# readline 라이브러리 활성화 (한국어 입력 처리 개선)
+try:
+    import readline
+    # macOS에서 libedit 사용 시 처리
+    if 'libedit' in readline.__doc__:
+        readline.parse_and_bind("bind ^I rl_complete")
+    else:
+        readline.parse_and_bind("tab: complete")
+except ImportError:
+    pass  # Windows에서는 readline이 없을 수 있음
+
 # 현재 디렉토리를 Python 경로에 추가
 sys.path.insert(0, str(Path(__file__).parent))
 

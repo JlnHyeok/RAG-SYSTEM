@@ -1,23 +1,52 @@
 import logging
-from typing import Optional
+import hashlib
+from typing import Optional, Dict, Any, List, Tuple
 import google.generativeai as genai
 import asyncio
 from functools import lru_cache
+from datetime import datetime, timedelta
 
 from app.core.config import settings
+from app.models.exceptions import (
+    GeminiAPIError,
+    QuotaExceededError,
+    ModelNotInitializedError
+)
 
 logger = logging.getLogger(__name__)
 
 
 class GeminiService:
-    """Google Gemini LLM 서비스 클래스"""
+    """
+    Google Gemini LLM 서비스 클래스
     
-    def __init__(self):
-        self.model = None
-        self._initialized = False
+    Gemini API와의 모든 상호작용을 처리하는 서비스 클래스.
+    컨텍스트 기반 답변 생성, 프롬프트 캐싱, 요약 및 키워드 추출 기능 제공.
+    
+    Attributes:
+        model: Gemini GenerativeModel 인스턴스
+        model_name: 사용 중인 모델 이름
+        _initialized: 초기화 완료 여부
+        _prompt_cache: 프롬프트 결과 캐시
+    """
+    
+    def __init__(self) -> None:
+        self.model: Optional[genai.GenerativeModel] = None
+        self.model_name: str = ""
+        self._initialized: bool = False
+        self._prompt_cache: Dict[str, Tuple[str, datetime]] = {}  # hash -> (result, timestamp)
+        self._cache_ttl_minutes: int = 30
         
-    async def initialize(self, test_connection: bool = False):
-        """Gemini API 초기화"""
+    async def initialize(self, test_connection: bool = False) -> None:
+        """
+        Gemini API 초기화
+        
+        Args:
+            test_connection: 연결 테스트 수행 여부
+            
+        Raises:
+            GeminiAPIError: API 초기화 실패 시
+        """
         try:
             if not settings.GEMINI_API_KEY:
                 logger.warning("GEMINI_API_KEY가 설정되지 않음. Gemini 서비스 비활성화")
@@ -27,39 +56,43 @@ class GeminiService:
             # Gemini API 설정
             genai.configure(api_key=settings.GEMINI_API_KEY)
             
-            # 모델 초기화 (환경변수에서 모델명 가져오기, 없으면 기본값 사용)
-            model_name = settings.GEMINI_MODEL or "gemini-2.0-flash-lite"
-            self.model = genai.GenerativeModel(model_name)
+            # 모델 초기화
+            self.model_name = settings.GEMINI_MODEL or "gemini-2.0-flash-lite"
+            self.model = genai.GenerativeModel(self.model_name)
             
             # 연결 테스트 (선택적)
             if test_connection:
                 try:
                     await self._test_connection()
-                except Exception as e:
-                    if "quota" in str(e).lower() or "429" in str(e):
-                        logger.warning(f"Gemini API 할당량 초과, 연결 테스트 건너뛰기: {e}")
-                    else:
-                        logger.error(f"Gemini API 연결 테스트 실패: {e}")
-                        raise
+                except QuotaExceededError:
+                    logger.warning("Gemini API 할당량 초과, 연결 테스트 건너뛰기")
+                except GeminiAPIError as e:
+                    logger.error(f"Gemini API 연결 테스트 실패: {e}")
+                    raise
             
             self._initialized = True
-            logger.info("Gemini API 초기화 완료")
+            logger.info(f"Gemini API 초기화 완료 (Model: {self.model_name})")
             
         except Exception as e:
-            if "quota" in str(e).lower() or "429" in str(e):
+            if self._is_quota_exceeded(e):
                 logger.warning(f"Gemini API 할당량 초과, 기본 설정으로 초기화: {e}")
-                # 기본 설정으로라도 초기화
                 genai.configure(api_key=settings.GEMINI_API_KEY)
-                model_name = settings.GEMINI_MODEL or "gemini-2.0-flash-lite"
-                self.model = genai.GenerativeModel(model_name)
+                self.model_name = settings.GEMINI_MODEL or "gemini-2.0-flash-lite"
+                self.model = genai.GenerativeModel(self.model_name)
                 self._initialized = True
                 logger.info("Gemini API 기본 초기화 완료 (연결 테스트 미실행)")
             else:
                 logger.error(f"Gemini API 초기화 실패: {e}")
-                raise
+                raise GeminiAPIError(f"Gemini API 초기화 실패: {str(e)}")
     
-    async def _test_connection(self):
-        """Gemini API 연결 테스트"""
+    async def _test_connection(self) -> None:
+        """
+        Gemini API 연결 테스트
+        
+        Raises:
+            QuotaExceededError: API 할당량 초과 시
+            GeminiAPIError: 연결 테스트 실패 시
+        """
         try:
             test_prompt = "안녕하세요. 연결 테스트입니다."
             response = await asyncio.to_thread(
@@ -68,13 +101,15 @@ class GeminiService:
             )
             
             if not response.text:
-                raise Exception("Gemini API 응답이 비어있습니다")
+                raise GeminiAPIError("Gemini API 응답이 비어있습니다")
                 
             logger.info("Gemini API 연결 테스트 성공")
             
         except Exception as e:
+            if self._is_quota_exceeded(e):
+                raise QuotaExceededError()
             logger.error(f"Gemini API 연결 테스트 실패: {e}")
-            raise
+            raise GeminiAPIError(f"Gemini API 연결 테스트 실패: {str(e)}")
     
     def _is_quota_exceeded(self, error: Exception) -> bool:
         """할당량 초과 에러 여부 확인"""
@@ -92,23 +127,90 @@ class GeminiService:
             stop_sequences=[]   # 중단 시퀀스 없음으로 완전한 답변 보장
         )
     
-    @lru_cache(maxsize=100)
-    def _cached_generate(self, prompt_hash: str, prompt: str) -> str:
-        """자주 사용되는 프롬프트 캐싱"""
+    @lru_cache(maxsize=200)
+    def _cached_generate_lru(self, prompt_hash: str, prompt: str) -> str:
+        """
+        LRU 캐시 기반 프롬프트 생성 (짧은 프롬프트용)
+        
+        Args:
+            prompt_hash: 프롬프트 해시값
+            prompt: 실제 프롬프트 텍스트
+            
+        Returns:
+            생성된 응답 텍스트
+            
+        Raises:
+            ModelNotInitializedError: 모델 미초기화 시
+        """
         if not self._initialized:
-            raise RuntimeError("Gemini 서비스가 초기화되지 않았습니다")
+            raise ModelNotInitializedError()
             
         response = self.model.generate_content(prompt)
         return response.text
+    
+    def _get_cached_result(self, prompt: str) -> Optional[str]:
+        """
+        TTL 기반 캐시에서 결과 조회
+        
+        Args:
+            prompt: 프롬프트 텍스트
+            
+        Returns:
+            캐시된 결과 또는 None
+        """
+        prompt_hash = hashlib.md5(prompt.encode()).hexdigest()
+        
+        if prompt_hash in self._prompt_cache:
+            result, timestamp = self._prompt_cache[prompt_hash]
+            # TTL 확인
+            if datetime.now() - timestamp < timedelta(minutes=self._cache_ttl_minutes):
+                logger.debug(f"프롬프트 캐시 히트: {prompt_hash[:8]}...")
+                return result
+            else:
+                # 만료된 캐시 삭제
+                del self._prompt_cache[prompt_hash]
+        
+        return None
+    
+    def _set_cached_result(self, prompt: str, result: str) -> None:
+        """
+        TTL 기반 캐시에 결과 저장
+        
+        Args:
+            prompt: 프롬프트 텍스트
+            result: 생성된 결과
+        """
+        prompt_hash = hashlib.md5(prompt.encode()).hexdigest()
+        self._prompt_cache[prompt_hash] = (result, datetime.now())
+        
+        # 캐시 크기 제한 (500개 초과 시 가장 오래된 항목 제거)
+        if len(self._prompt_cache) > 500:
+            oldest_key = min(self._prompt_cache.keys(), 
+                           key=lambda k: self._prompt_cache[k][1])
+            del self._prompt_cache[oldest_key]
     
     async def generate_answer(
         self,
         question: str,
         context: str,
-        max_tokens: int = 2000,  # 기본값을 1000에서 2000으로 증가
+        max_tokens: int = 2000,
         temperature: float = 0.1
     ) -> str:
-        """컨텍스트 기반 답변 생성"""
+        """
+        컨텍스트 기반 답변 생성
+        
+        Args:
+            question: 사용자 질문
+            context: 검색된 문서 컨텍스트
+            max_tokens: 최대 응답 토큰 수
+            temperature: 생성 다양성 (0.0~1.0)
+            
+        Returns:
+            생성된 답변 텍스트
+            
+        Raises:
+            GeminiAPIError: API 호출 실패 시
+        """
         try:
             if not self._initialized:
                 await self.initialize()
@@ -116,26 +218,42 @@ class GeminiService:
             # 프롬프트 구성
             prompt = self._build_rag_prompt(question, context)
             
-            # 짧은 프롬프트는 캐시 사용
+            # TTL 캐시 확인 (중간 길이 프롬프트)
+            if len(prompt) < 2000:
+                cached_result = self._get_cached_result(prompt)
+                if cached_result:
+                    return cached_result
+            
+            # 짧은 프롬프트는 LRU 캐시도 사용
             if len(prompt) < 500:
-                prompt_hash = str(hash(prompt))
+                prompt_hash = hashlib.md5(prompt.encode()).hexdigest()
                 try:
-                    return self._cached_generate(prompt_hash, prompt)
+                    result = self._cached_generate_lru(prompt_hash, prompt)
+                    self._set_cached_result(prompt, result)  # TTL 캐시에도 저장
+                    return result
+                except QuotaExceededError:
+                    return self._get_quota_exceeded_response(question, context)
                 except Exception as e:
                     if self._is_quota_exceeded(e):
                         return self._get_quota_exceeded_response(question, context)
                     raise
             
             # 긴 프롬프트는 비동기 처리
-            def generate():
+            def generate() -> str:
                 response = self.model.generate_content(
                     prompt,
                     generation_config=self._create_generation_config(max_tokens, temperature)
                 )
                 return response.text
             
-            return await asyncio.to_thread(generate)
+            result = await asyncio.to_thread(generate)
             
+            # 결과를 TTL 캐시에 저장
+            self._set_cached_result(prompt, result)
+            return result
+            
+        except QuotaExceededError:
+            return self._get_quota_exceeded_response(question, context)
         except Exception as e:
             logger.error(f"Gemini 답변 생성 실패: {e}")
             if self._is_quota_exceeded(e):
