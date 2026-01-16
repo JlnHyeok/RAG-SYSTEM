@@ -411,3 +411,232 @@ sequenceDiagram
 - **고급 검색 필터**
 - **사용자 권한 관리**
 - **API 버전 관리**
+
+## 3. RAG 시스템 전체 구조와 Agent 역할
+
+### 3.1 RAG 시스템 3계층 아키텍처
+
+**전체 시스템은 3개 독립적인 서비스로 구성됩니다:**
+
+```
+┌──────────────────────┐    ┌───────────────────────┐    ┌───────────────────────┐
+│      Frontend        │    │       Backend         │    │        Agent          │
+│    (SvelteKit)       │◄──►│      (NestJS)         │◄──►│   (Python/FastAPI)    │
+│                      │    │                       │    │                       │
+│   USER INTERFACE     │    │   API GATEWAY         │    │   AI LOGIC PROCESSING │
+│   - Chat UI          │    │   - Authentication    │    │   - LLM Calls         │
+│   - File Upload      │    │   - Data Management   │    │   - Embedding Creation│
+│   - Search Results   │    │   - Logging/Monitoring│    │   - Vector Search     │
+└──────────────────────┘    └───────────────────────┘    └───────────────────────┘
+```
+
+### 3.2 각 컴포넌트의 역할과 책임
+
+#### 3.2.1 Agent (AI 처리 엔진) - 핵심!
+
+**Agent가 담고 있는 것들:**
+
+```python
+# Agent의 전체 구조 - 모든 AI 관련 로직이 여기 집중
+class RAGAgent:
+    """RAG 시스템의 두뇌 역할 - 모든 AI 처리를 담당"""
+
+    def __init__(self):
+        # 1. LLM 클라이언트 (텍스트 생성)
+        self.gemini_client = self._init_gemini()
+
+        # 2. 임베딩 모델들 (벡터 변환) ← 여기서 임베딩 모델 관리!
+        self.embedding_models = {
+            "text": SentenceTransformer('all-MiniLM-L6-v2'),
+            "multimodal": CLIPModel.from_pretrained("openai/clip-vit-base-patch32"),
+            "korean": SentenceTransformer('jhgan/ko-sroberta-multitask')
+        }
+
+        # 3. 벡터 데이터베이스 연결
+        self.vector_db = QdrantClient("localhost", port=6333)
+
+        # 4. 문서 처리 파이프라인
+        self.document_processor = MultiModalDocumentProcessor()
+
+        # 5. OCR 엔진들 (이미지에서 텍스트 추출)
+        self.ocr_engines = {
+            "tesseract": pytesseract,
+            "paddleocr": PaddleOCR(),
+            "easyocr": easyocr.Reader(['ko', 'en'])
+        }
+
+        # 6. 이미지 전처리 (화질 개선)
+        self.image_enhancer = ImageEnhancer()
+
+    def process_document(self, file_path: str):
+        """문서 업로드 시 호출 - 벡터화해서 DB에 저장"""
+        # 1. 파일 타입에 따른 처리
+        if file_path.endswith('.pdf'):
+            content = self._process_pdf(file_path)
+        elif file_path.endswith(('.jpg', '.png')):
+            content = self._process_image(file_path)
+
+        # 2. 임베딩 생성 (Agent 내부에서 처리)
+        embeddings = self.embedding_models["text"].encode(content)
+
+        # 3. 벡터 DB에 저장
+        self.vector_db.upsert(
+            collection_name="documents",
+            points=[{"id": uuid.uuid4(), "vector": embeddings, "payload": {"content": content}}]
+        )
+
+    def query(self, user_question: str) -> str:
+        """사용자 질문 처리 - RAG의 핵심 로직"""
+        # 1. 질문을 벡터로 변환 (임베딩)
+        question_vector = self.embedding_models["text"].encode([user_question])
+
+        # 2. 유사한 문서 검색 (벡터 유사도)
+        search_results = self.vector_db.search(
+            collection_name="documents",
+            query_vector=question_vector[0],
+            limit=5
+        )
+
+        # 3. 검색된 컨텍스트 + 질문을 LLM에 전달
+        context = "\n".join([result.payload["content"] for result in search_results])
+
+        # 4. Gemini로 최종 답변 생성
+        prompt = f"컨텍스트: {context}\n질문: {user_question}\n답변:"
+        response = self.gemini_client.generate_content(prompt)
+
+        return response.text
+```
+
+#### 3.2.2 Backend (비즈니스 로직)
+
+**Agent와 Frontend를 연결하는 중간 계층:**
+
+```python
+# Backend의 역할 - Agent를 호출하고 결과를 관리
+@Controller('rag')
+class RAGController:
+    """NestJS Backend - API 엔드포인트 제공"""
+
+    def __init__(self):
+        self.agent_client = HTTPClient("http://agent-service:8000")  # Agent 호출
+        self.user_service = UserService()
+        self.document_service = DocumentService()
+
+    @Post('upload')
+    async def upload_document(self, file: File, user_id: str):
+        """파일 업로드 처리"""
+        # 1. 사용자 권한 확인
+        if not await self.user_service.check_permission(user_id):
+            raise UnauthorizedException()
+
+        # 2. 파일 저장
+        file_path = await self.save_file(file)
+
+        # 3. Agent에게 문서 처리 요청 (여기서 임베딩 처리됨)
+        result = await self.agent_client.post('/process-document', {
+            'file_path': file_path,
+            'user_id': user_id
+        })
+
+        # 4. 메타데이터 DB에 저장
+        await self.document_service.save_metadata(file_path, user_id, result)
+
+        return {"status": "success", "document_id": result.document_id}
+
+    @Post('query')
+    async def query(self, question: str, user_id: str):
+        """사용자 질문 처리"""
+        # 1. 사용자 권한 확인
+        await self.user_service.validate_user(user_id)
+
+        # 2. Agent에게 질문 전달
+        answer = await self.agent_client.post('/query', {
+            'question': question,
+            'user_id': user_id
+        })
+
+        # 3. 대화 이력 저장
+        await self.chat_service.save_conversation(user_id, question, answer)
+
+        return {"answer": answer, "timestamp": new Date()}
+```
+
+#### 3.2.3 Frontend (사용자 인터페이스)
+
+**사용자가 실제로 보는 화면:**
+
+```svelte
+<!-- SvelteKit Frontend - 채팅 인터페이스 -->
+<script>
+    import { onMount } from 'svelte';
+
+    let messages = [];
+    let userInput = '';
+    let isLoading = false;
+
+    async function sendMessage() {
+        if (!userInput.trim()) return;
+
+        // 사용자 메시지 추가
+        messages = [...messages, { type: 'user', content: userInput }];
+        const question = userInput;
+        userInput = '';
+        isLoading = true;
+
+        try {
+            // Backend API 호출 (Backend이 Agent 호출)
+            const response = await fetch('/api/rag/query', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ question })
+            });
+
+            const result = await response.json();
+
+            // AI 응답 추가
+            messages = [...messages, { type: 'ai', content: result.answer }];
+        } catch (error) {
+            messages = [...messages, { type: 'error', content: '오류가 발생했습니다.' }];
+        } finally {
+            isLoading = false;
+        }
+    }
+
+    async function uploadFile(event) {
+        const file = event.target.files[0];
+        if (!file) return;
+
+        const formData = new FormData();
+        formData.append('file', file);
+
+        // Backend에 파일 업로드 (Backend이 Agent에게 처리 요청)
+        const response = await fetch('/api/rag/upload', {
+            method: 'POST',
+            body: formData
+        });
+
+        const result = await response.json();
+        messages = [...messages, { type: 'system', content: `파일 "${file.name}" 업로드 완료` }];
+    }
+</script>
+
+<div class="chat-container">
+    <!-- 파일 업로드 -->
+    <input type="file" on:change={uploadFile} accept=".pdf,.jpg,.png" />
+
+    <!-- 채팅 메시지들 -->
+    {#each messages as message}
+        <div class="message {message.type}">
+            {message.content}
+        </div>
+    {/each}
+
+    <!-- 입력창 -->
+    <form on:submit|preventDefault={sendMessage}>
+        <input bind:value={userInput} placeholder="질문을 입력하세요..." />
+        <button type="submit" disabled={isLoading}>
+            {isLoading ? '처리중...' : '전송'}
+        </button>
+    </form>
+</div>
+```

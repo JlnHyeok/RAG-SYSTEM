@@ -23,8 +23,6 @@ class RAGEngine:
         self._initialized = False
         # 대화 히스토리 관리 (메모리 기반, 실제 운영시에는 Redis/DB 사용 권장)
         self.conversation_history: Dict[str, List[Dict[str, Any]]] = {}
-        # 대화 히스토리 관리 (메모리 기반, 실제 운영시에는 Redis/DB 사용 권장)
-        self.conversation_history: Dict[str, List[Dict[str, Any]]] = {}
     
     async def initialize(self):
         """RAG 엔진 초기화"""
@@ -351,13 +349,13 @@ RAG 문서 검색 AI 어시스턴트로서 친근하고 자연스럽게 응답�
             
             # 답변 품질 검증
             if self._is_answer_complete(answer, original_question):
-                return self._remove_duplicate_content(answer, use_llm=True)
+                return self._remove_duplicate_content(answer)
             else:
                 logger.warning("Gemini 답변이 불완전함, 보완된 답변 생성")
                 enhanced_answer = await self._create_enhanced_gemini_answer(
                     original_question, context, answer, history_context + context_note
                 )
-                return self._remove_duplicate_content(enhanced_answer, use_llm=True)
+                return self._remove_duplicate_content(enhanced_answer)
                 
         except Exception as e:
             logger.warning(f"맥락 인식 Gemini API 실패: {e}")
@@ -366,13 +364,13 @@ RAG 문서 검색 AI 어시스턴트로서 친근하고 자연스럽게 응답�
             try:
                 simple_answer = await self._generate_simple_gemini_answer(question_to_use, context)
                 if len(simple_answer.strip()) > 50:
-                    return self._remove_duplicate_content(simple_answer, use_llm=True)
+                    return self._remove_duplicate_content(simple_answer)
             except Exception as e2:
                 logger.warning(f"Gemini API 2차 실패: {e2}")
             
             # 3단계: LLM 기반 구조화된 fallback
             fallback_answer = await self._create_llm_guided_fallback(question_to_use, context)
-            return self._remove_duplicate_content(fallback_answer, use_llm=True)
+            return self._remove_duplicate_content(fallback_answer)
     
     def _create_reasoning_prompt(self, question: str, context: str, additional_context: str = "") -> str:
         """추론 강화 프롬프트 생성 - 일반인 친화적 답변"""
@@ -400,7 +398,8 @@ RAG 문서 검색 AI 어시스턴트로서 친근하고 자연스럽게 응답�
 ✅ **친근한 톤**: 딱딱한 공식 문서 톤이 아닌 친근한 설명 톤 사용
 ✅ **중복 방지**: 같은 내용을 반복하지 말고, 한 번에 완전한 답변을 제공하세요. 이전 답변과 중복되는 내용은 피하세요.
 ✅ **일관성 유지**: 하나의 답변으로 완성하세요. 여러 버전의 답변을 제공하지 마세요.
-✅ **표 포맷팅**: 표를 사용할 때는 Markdown 표 형식을 정확히 사용하고, 각 열의 너비를 데이터에 맞게 조정하여 가독성을 높이세요. 헤더와 데이터의 길이를 고려하여 공백을 적절히 추가하세요.
+✅ **완전한 답변**: 질문의 유형에 따라 필요한 모든 세부사항(일수, 절차, 조건, 서류 등)을 포함해서 완전한 답변을 제공하세요.
+✅ **표 포맷팅**: 표를 사용할 때는 Markdown 표 형식을 정확히 사용하고, 각 열의 너비를 데이터에 맞게 조정하여 가독성을 높이세요. 헤더와 데이터의 길이를 고려하여 공백을 추가하세요.
 
 답변 형식:
 **간단한 답변:**
@@ -449,7 +448,7 @@ RAG 문서 검색 AI 어시스턴트로서 친근하고 자연스럽게 응답�
             )
             return response.text
         
-        return self._remove_duplicate_content(await asyncio.to_thread(generate), use_llm=True)
+        return self._remove_duplicate_content(await asyncio.to_thread(generate))
     
     async def _create_enhanced_gemini_answer(
         self, 
@@ -509,7 +508,7 @@ RAG 문서 검색 AI 어시스턴트로서 친근하고 자연스럽게 응답�
                 
                 result = await asyncio.to_thread(generate)
                 if len(result.strip()) > 30:
-                    return self._remove_duplicate_content(result, use_llm=True)
+                    return self._remove_duplicate_content(result)
                     
         except Exception as e:
             logger.warning(f"LLM 가이드 fallback 실패: {e}")
@@ -975,26 +974,12 @@ RAG 문서 검색 AI 어시스턴트로서 친근하고 자연스럽게 응답�
         self._initialized = False
         logger.info("RAG 엔진 리소스 정리 완료")
 
-    def _remove_duplicate_content(self, answer: str, use_llm: bool = False) -> str:
+    def _remove_duplicate_content(self, answer: str) -> str:
         """답변에서 중복된 내용을 제거하고 표를 재포맷팅"""
         import re
         
         # 먼저 표 재포맷팅
         answer = self._reformat_markdown_table(answer)
-        
-        if use_llm:
-            # LLM 기반 중복 제거 (비동기지만 여기서는 동기로 처리)
-            import asyncio
-            try:
-                loop = asyncio.get_event_loop()
-                if loop.is_running():
-                    # 이미 이벤트 루프가 실행 중이면 동기 버전 사용
-                    return self._sync_llm_deduplication(answer)
-                else:
-                    return loop.run_until_complete(self._llm_based_deduplication(answer))
-            except Exception as e:
-                logger.warning(f"LLM 중복 제거 호출 실패: {e}")
-                # 실패시 기존 로직으로 진행
         
         # 섹션별로 나누기 (예: **간단한 답변:**, **자세한 설명:** 등)
         sections = re.split(r'(\*\*.*?\*\*:)', answer)
@@ -1022,65 +1007,6 @@ RAG 문서 검색 AI 어시스턴트로서 친근하고 자연스럽게 응답�
                 cleaned_sections.append('\n'.join(unique_lines))
         
         return ''.join(cleaned_sections).strip()
-
-    def _sync_llm_deduplication(self, answer: str) -> str:
-        """동기 버전 LLM 중복 제거 (이벤트 루프 실행 중일 때 사용)"""
-        try:
-            dedup_prompt = f"""다음 답변에서 중복된 내용을 찾아서 제거해주세요. 
-
-중복 제거 규칙:
-- 같은 내용을 반복해서 설명한 부분 제거
-- 여러 버전의 인사말이나 소개는 하나만 남김
-- 중복된 예시나 설명은 하나로 통합
-- 핵심 내용은 유지하면서 불필요한 반복 제거
-
-원본 답변:
-{answer}
-
-정제된 답변:"""
-
-            # 동기 호출 (generate_answer가 동기라고 가정)
-            cleaned_answer = self.gemini_service.generate_answer_sync(
-                question=dedup_prompt,
-                context="",
-                max_tokens=2000,
-                temperature=0.1
-            )
-            
-            return cleaned_answer.strip()
-            
-        except Exception as e:
-            logger.warning(f"동기 LLM 중복 제거 실패: {e}")
-            return answer  # 실패시 원본 반환
-
-    async def _llm_based_deduplication(self, answer: str) -> str:
-        """LLM을 사용하여 답변에서 중복된 내용을 제거"""
-        try:
-            dedup_prompt = f"""다음 답변에서 중복된 내용을 찾아서 제거해주세요. 
-
-중복 제거 규칙:
-- 같은 내용을 반복해서 설명한 부분 제거
-- 여러 버전의 인사말이나 소개는 하나만 남김
-- 중복된 예시나 설명은 하나로 통합
-- 핵심 내용은 유지하면서 불필요한 반복 제거
-
-원본 답변:
-{answer}
-
-정제된 답변:"""
-
-            cleaned_answer = await self.gemini_service.generate_answer(
-                question=dedup_prompt,
-                context="",
-                max_tokens=2000,
-                temperature=0.1
-            )
-            
-            return cleaned_answer.strip()
-            
-        except Exception as e:
-            logger.warning(f"LLM 중복 제거 실패: {e}")
-            return answer  # 실패시 원본 반환
 
     def _reformat_markdown_table(self, text: str) -> str:
         """Markdown 표를 찾아서 정렬된 표로 재포맷팅"""

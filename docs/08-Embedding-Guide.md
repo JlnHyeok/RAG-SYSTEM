@@ -1356,3 +1356,572 @@ if __name__ == "__main__":
 ```
 
 임베딩은 현대 AI 시스템의 핵심 구성요소로, RAG부터 추천 시스템까지 다양한 애플리케이션에서 활용됩니다. 적절한 임베딩 기법 선택과 최적화를 통해 AI 서비스의 성능을 크게 향상시킬 수 있습니다.
+
+---
+
+## 6. 벡터 유사도 측정의 심층 분석
+
+### 6.1 유사도 측정의 수학적 기초
+
+벡터 유사도 측정은 **두 벡터 간의 관계를 수치화하는 방법**입니다. 임베딩 공간에서 유사도는 **의미적 유사성**을 반영합니다.
+
+#### 코사인 유사도 (Cosine Similarity)
+
+**코사인 유사도**는 두 벡터 간의 **각도**를 측정합니다. 벡터의 크기(노름)는 무시하고 방향만 고려합니다.
+
+```python
+import numpy as np
+from sklearn.metrics.pairwise import cosine_similarity
+
+def cosine_similarity_detailed(vec1, vec2):
+    """
+    코사인 유사도의 상세 계산 과정
+    """
+    # 1. 벡터의 내적 계산
+    dot_product = np.dot(vec1, vec2)
+
+    # 2. 각 벡터의 노름(크기) 계산
+    norm1 = np.linalg.norm(vec1)
+    norm2 = np.linalg.norm(vec2)
+
+    # 3. 코사인 유사도 계산
+    cosine_sim = dot_product / (norm1 * norm2)
+
+    return cosine_sim, dot_product, norm1, norm2
+
+# 예시 벡터들
+vec_a = np.array([1, 2, 3])      # "고양이"
+vec_b = np.array([1, 2, 4])      # "강아지" (유사한 의미)
+vec_c = np.array([-1, -2, -3])   # "고양이"와 반대 방향
+vec_d = np.array([0, 0, 0])      # 영벡터
+
+print("=== 코사인 유사도 상세 분석 ===")
+print(f"vec_a vs vec_b: {cosine_similarity_detailed(vec_a, vec_b)}")
+print(f"vec_a vs vec_c: {cosine_similarity_detailed(vec_a, vec_c)}")
+print(f"vec_a vs vec_d: {cosine_similarity_detailed(vec_a, vec_d)}")
+```
+
+**코사인 유사도의 특징:**
+
+- **범위**: -1 (완전 반대) ~ 1 (완전 동일)
+- **장점**: 벡터 크기에 영향을 받지 않음
+- **단점**: 각도만 고려하므로 크기 정보 손실
+
+#### 유클리드 거리 (Euclidean Distance)
+
+**유클리드 거리**는 두 점 사이의 **직선 거리**를 측정합니다. 피타고라스 정리를 일반화한 개념입니다.
+
+```python
+def euclidean_distance(vec1, vec2):
+    """
+    유클리드 거리의 상세 계산
+    """
+    # 1. 차이 벡터 계산
+    diff = vec1 - vec2
+
+    # 2. 각 차원의 제곱합
+    squared_sum = np.sum(diff ** 2)
+
+    # 3. 제곱근 취하기
+    distance = np.sqrt(squared_sum)
+
+    return distance, diff, squared_sum
+
+# 예시 계산
+vec1 = np.array([1, 2, 3])
+vec2 = np.array([4, 6, 8])
+
+distance, diff, squared_sum = euclidean_distance(vec1, vec2)
+print(f"유클리드 거리: {distance}")
+print(f"차이 벡터: {diff}")
+print(f"제곱합: {squared_sum}")
+```
+
+**유클리드 거리의 특징:**
+
+- **범위**: 0 (완전 동일) ~ ∞ (완전 다름)
+- **장점**: 직관적이고 계산이 간단함
+- **단점**: 차원 수가 증가할수록 거리가 커지는 현상 (차원의 저주)
+
+#### 맨하탄 거리 (Manhattan Distance)
+
+**맨하탄 거리**는 **격자 도시의 거리 측정**처럼 각 차원의 절대값 합을 계산합니다.
+
+```python
+def manhattan_distance(vec1, vec2):
+    """
+    맨하탄 거리 계산 (L1 노름)
+    """
+    # 각 차원의 절대값 합
+    distance = np.sum(np.abs(vec1 - vec2))
+
+    return distance
+
+# 예시: 도시 블록 거리
+vec1 = np.array([0, 0])  # 출발점
+vec2 = np.array([3, 4])  # 도착점
+
+manhattan_dist = manhattan_distance(vec1, vec2)
+euclidean_dist = euclidean_distance(vec1, vec2)[0]
+
+print(f"맨하탄 거리: {manhattan_dist}")    # 7 (3+4)
+print(f"유클리드 거리: {euclidean_dist:.2f}")  # 5.0 (직선 거리)
+```
+
+#### 내적 유사도 (Dot Product Similarity)
+
+**내적 유사도**는 두 벡터의 **스칼라 곱**입니다. 코사인 유사도와 밀접한 관계가 있습니다.
+
+```python
+def dot_product_similarity(vec1, vec2):
+    """
+    내적 유사도 계산
+    """
+    # 정규화되지 않은 내적
+    raw_dot = np.dot(vec1, vec2)
+
+    # 정규화된 내적 (코사인 유사도와 동일)
+    norm1 = np.linalg.norm(vec1)
+    norm2 = np.linalg.norm(vec2)
+    normalized_dot = raw_dot / (norm1 * norm2)
+
+    return raw_dot, normalized_dot
+
+# 예시
+vec1 = np.array([1, 2, 3])
+vec2 = np.array([2, 4, 6])  # vec1의 2배
+
+raw_dot, norm_dot = dot_product_similarity(vec1, vec2)
+print(f"원시 내적: {raw_dot}")        # 1*2 + 2*4 + 3*6 = 28
+print(f"정규화 내적: {norm_dot}")    # 코사인 유사도 = 1.0
+```
+
+### 6.2 현재 Agent의 유사도 측정 방식
+
+우리 RAG 시스템의 **Agent**에서는 **코사인 유사도**를 기본 유사도 측정 방식으로 사용합니다.
+
+#### 선택 이유
+
+```python
+# 실제 agent 코드에서 사용하는 방식 (vector_store.py)
+from qdrant_client.models import Distance, VectorParams
+
+# 컬렉션 생성 시 코사인 유사도 지정
+vectors_config=VectorParams(size=vector_size, distance=Distance.COSINE)
+```
+
+**코사인 유사도를 선택한 이유:**
+
+1. **의미적 유사성 포착**: 텍스트 임베딩에서 **방향성**이 의미를 더 잘 표현
+
+   ```python
+   # 예: 비슷한 주제의 문서들은 비슷한 방향을 가짐
+   science_doc = "머신러닝 알고리즘"      # 방향: [0.2, 0.8, 0.1]
+   tech_doc = "딥러닝 모델"             # 방향: [0.3, 0.7, 0.2] (유사)
+   sports_doc = "축구 경기"             # 방향: [0.9, 0.1, 0.8] (다름)
+   ```
+
+2. **벡터 크기 정규화**: SentenceTransformers 모델이 이미 L2 정규화를 수행하므로 최적
+
+   ```python
+   # SentenceTransformers의 기본 동작
+   from sentence_transformers import SentenceTransformer
+   model = SentenceTransformer('all-MiniLM-L6-v2')
+   embeddings = model.encode(texts, normalize_embeddings=True)  # L2 정규화
+   ```
+
+3. **Qdrant 최적화**: 벡터 데이터베이스가 코사인 유사도를 가장 효율적으로 처리
+
+   ```python
+   # Qdrant의 코사인 유사도 계산 최적화
+   # 1. 정규화된 벡터이므로 내적만 계산하면 됨
+   # 2. SIMD 명령어로 고속 계산 가능
+   # 3. 메모리 사용량 감소
+   ```
+
+4. **다국어 지원**: 한국어-영어 간 비교 시 크기 차이 무시하고 방향만 고려
+
+#### 실제 사용 예시
+
+```python
+# agent의 실제 검색 로직 (vector_store.py)
+async def search_similar(self, collection_name: str, query_vector: List[float]):
+    search_result = await asyncio.to_thread(
+        self.client.search,
+        collection_name=collection_name,
+        query_vector=query_vector,
+        limit=5,
+        score_threshold=0.7,  # 코사인 유사도 임계값
+        query_filter=query_filter
+    )
+
+    # 결과: 코사인 유사도 점수 (0.7 ~ 1.0 범위)
+    for hit in search_result:
+        score = hit.score  # 코사인 유사도 값
+        content = hit.payload["content"]
+```
+
+#### 다른 유사도 방식과의 비교
+
+| 방식         | 장점                          | 단점                   | 우리 시스템 적합성 |
+| ------------ | ----------------------------- | ---------------------- | ------------------ |
+| **코사인**   | 의미적 유사성 우수, 크기 독립 | 각도만 고려            | ⭐⭐⭐⭐⭐         |
+| **유클리드** | 직관적, 계산 간단             | 차원의 저주, 크기 영향 | ⭐⭐               |
+| **맨하탄**   | 이상치에 강함                 | 의미적 유사성 부족     | ⭐                 |
+| **내적**     | 계산 효율성                   | 크기 편향              | ⭐⭐⭐             |
+
+---
+
+## 7. 임베딩 모델의 종류와 심층 분석
+
+### 7.1 텍스트 임베딩 모델
+
+#### 7.1.1 Sentence-BERT 계열
+
+**개념**: BERT를 문장 임베딩용으로 미세 조정한 모델들
+
+```python
+from sentence_transformers import SentenceTransformer
+
+# 대표적인 Sentence-BERT 모델들
+models = {
+    "all-MiniLM-L6-v2": "범용, 빠름, 384차원",
+    "all-MiniLM-L12-v2": "더 깊음, 느림, 384차원",
+    "all-mpnet-base-v2": "높은 품질, 768차원",
+    "paraphrase-multilingual-MiniLM-L12-v2": "다국어 지원"
+}
+
+# 모델 로딩 및 사용
+model = SentenceTransformer('all-MiniLM-L6-v2')
+embeddings = model.encode(["Hello world", "Bonjour le monde"])
+```
+
+**장점:**
+
+- 문장 수준 이해
+- 의미적 유사성 우수
+- 미세 조정 가능
+
+**단점:**
+
+- 계산 비용较高
+- 모델 크기 큼
+
+#### 7.1.2 E5 계열 (EmbEddings from bidirEctional Encoder)
+
+**개념**: Microsoft에서 개발한 범용 임베딩 모델
+
+```python
+# E5 모델들
+e5_models = {
+    "intfloat/e5-small": "작고 빠름",
+    "intfloat/e5-base": "균형 잡힘",
+    "intfloat/e5-large": "높은 품질"
+}
+
+# 사용법 (비대칭 검색용 프롬프트)
+query = "query: 머신러닝 알고리즘"
+document = "passage: 머신러닝은 데이터로부터 패턴을 학습하는 기술"
+
+model = SentenceTransformer('intfloat/e5-base')
+query_emb = model.encode(query)
+doc_emb = model.encode(document)
+```
+
+**특징:**
+
+- 비대칭 검색에 강함 (질문 ↔ 문서)
+- 프롬프트 튜닝으로 성능 향상
+- 오픈소스
+
+#### 7.1.3 BGE (BAAI General Embedding)
+
+**개념**: 중국 BAAI에서 개발한 고성능 임베딩 모델
+
+```python
+# BGE 모델들
+bge_models = {
+    "BAAI/bge-small-en": "영어 특화",
+    "BAAI/bge-base-en": "영어 범용",
+    "BAAI/bge-large-en": "영어 고품질",
+    "BAAI/bge-m3": "멀티모달 지원"
+}
+```
+
+**장점:**
+
+- 검색 성능 우수
+- 긴 텍스트 처리 능력
+- 다국어 지원
+
+### 7.2 멀티모달 임베딩 모델
+
+#### 7.2.1 CLIP (Contrastive Language-Image Pretraining)
+
+**개념**: OpenAI에서 개발한 텍스트-이미지 통합 임베딩
+
+```python
+from transformers import CLIPProcessor, CLIPModel
+
+model = CLIPModel.from_pretrained("openai/clip-vit-base-patch32")
+processor = CLIPProcessor.from_pretrained("openai/clip-vit-base-patch32")
+
+# 텍스트와 이미지 임베딩
+text = "a photo of a cat"
+image = Image.open("cat.jpg")
+
+inputs = processor(text=text, images=image, return_tensors="pt")
+outputs = model(**inputs)
+
+text_emb = outputs.text_embeds
+image_emb = outputs.image_embeds
+```
+
+**특징:**
+
+- 텍스트-이미지 의미 연결
+- 제로샷 분류 가능
+- 강력한 일반화 능력
+
+#### 7.2.2 BLIP (Bootstrapping Language-Image Pretraining)
+
+**개념**: Salesforce에서 개발한 이미지 캡셔닝용 모델
+
+```python
+from transformers import BlipProcessor, BlipModel
+
+processor = BlipProcessor.from_pretrained("Salesforce/blip-image-captioning-base")
+model = BlipModel.from_pretrained("Salesforce/blip-image-captioning-base")
+
+# 이미지로부터 텍스트 생성 + 임베딩
+inputs = processor(images=image, return_tensors="pt")
+outputs = model.generate(**inputs)  # 캡션 생성
+
+# 임베딩 추출
+vision_outputs = model.vision_model(pixel_values=inputs["pixel_values"])
+image_embeds = vision_outputs.last_hidden_state[:, 0, :]  # CLS 토큰
+```
+
+### 7.3 현재 Agent에서 사용하는 임베딩 모델
+
+우리 RAG 시스템의 **Agent**에서는 **세 가지 임베딩 모델**을 상황에 맞게 사용합니다.
+
+#### 7.3.1 기본 한국어 모델: `jhgan/ko-sroberta-multitask`
+
+```python
+# config.py에서 설정
+DEFAULT_EMBEDDING_MODEL = "jhgan/ko-sroberta-multitask"
+```
+
+**선택 이유:**
+
+1. **한국어 특화**: 한국어 텍스트에 최적화된 성능
+
+   ```python
+   # 한국어 이해 능력 테스트
+   texts = [
+       "머신러닝 모델 학습",     # 과학/기술
+       "축구 경기 결과",         # 스포츠
+       "요리 레시피 공유"        # 일상/요리
+   ]
+
+   model = SentenceTransformer("jhgan/ko-sroberta-multitask")
+   embeddings = model.encode(texts)
+
+   # 각 주제별로 다른 방향의 벡터 생성
+   ```
+
+2. **멀티태스크 학습**: 문장 분류, 유사도 측정, 자연어 추론 등 다양한 작업에 특화
+
+   ```python
+   # 멀티태스크 학습의 장점
+   # 1. 단일 모델로 여러 작업 수행 가능
+   # 2. 작업 간 지식 공유로 성능 향상
+   # 3. 메모리 효율성 증가
+   ```
+
+3. **적절한 크기**: 768차원으로 정확도와 속도의 균형
+   ```python
+   # 크기 비교
+   model_info = {
+       "jhgan/ko-sroberta-multitask": "768차원, 한국어 최적화",
+       "all-MiniLM-L6-v2": "384차원, 범용",
+       "text-embedding-ada-002": "1536차원, 고품질"
+   }
+   ```
+
+#### 7.3.2 멀티모달 모델: `clip-ViT-B-32`
+
+```python
+# config.py에서 설정
+MULTIMODAL_EMBEDDING_MODEL = "clip-ViT-B-32"
+```
+
+**선택 이유:**
+
+1. **텍스트-이미지 통합**: PDF 내 이미지와 텍스트를 함께 처리
+
+   ```python
+   # 멀티모달 검색 예시
+   query = "보일러실 배치도"
+   pdf_images = ["boiler_room_layout.jpg", "pipe_diagram.png"]
+
+   # 텍스트 쿼리와 이미지들을 같은 벡터 공간에 매핑
+   # 의미적으로 유사한 이미지 찾기 가능
+   ```
+
+2. **제로샷 능력**: 학습하지 않은 카테고리도 분류 가능
+
+   ```python
+   # 제로샷 이미지 분류
+   categories = ["기술 도면", "배관 설계", "전기 배선도"]
+   # 별도 학습 없이도 분류 가능
+   ```
+
+3. **범용성**: 다양한 이미지 형식 지원 (JPG, PNG, PDF 내 이미지)
+
+#### 7.3.3 범용 텍스트 모델: `all-MiniLM-L6-v2`
+
+```python
+# config.py에서 설정
+TEXT_EMBEDDING_MODEL = "all-MiniLM-L6-v2"
+```
+
+**선택 이유:**
+
+1. **속도와 품질의 균형**: 빠른 처리 속도 + 준수한 성능
+
+   ```python
+   # 성능 벤치마크 (대략적)
+   benchmarks = {
+       "all-MiniLM-L6-v2": {"speed": "빠름", "quality": "중간", "size": "23MB"},
+       "all-mpnet-base-v2": {"speed": "중간", "quality": "높음", "size": "109MB"},
+       "text-embedding-ada-002": {"speed": "중간", "quality": "매우 높음", "size": "API"}
+   }
+   ```
+
+2. **다국어 지원**: 영어 문서와 한국어 문서의 통합 검색
+
+   ```python
+   # 다국어 문서 처리
+   mixed_docs = [
+       "Machine learning algorithms",  # 영어
+       "머신러닝 알고리즘",            # 한국어
+       "Algorithmes d'apprentissage"   # 프랑스어
+   ]
+   # 같은 의미의 문서들이 가까운 벡터 위치
+   ```
+
+3. **생태계 호환성**: SentenceTransformers 라이브러리와 완벽 호환
+
+### 7.4 모델 선택 전략
+
+```python
+# embedding_manager.py의 모델 선택 로직
+class EmbeddingManager:
+    def select_model(self, content_type: str, language: str) -> str:
+        """
+        콘텐츠 타입과 언어에 따른 최적 모델 선택
+        """
+        if content_type == "multimodal":
+            return "clip-ViT-B-32"
+        elif language == "korean":
+            return "jhgan/ko-sroberta-multitask"
+        elif language == "english":
+            return "all-MiniLM-L6-v2"
+        else:
+            return "paraphrase-multilingual-MiniLM-L12-v2"  # 다국어
+```
+
+**선택 기준:**
+
+1. **콘텐츠 타입**: 텍스트만 vs 텍스트+이미지
+2. **언어**: 한국어 vs 영어 vs 다국어
+3. **성능 요구사항**: 정확도 vs 속도 vs 메모리
+4. **비용**: 오픈소스 vs API
+
+---
+
+## 8. 추가 최적화 기법
+
+### 8.1 하이브리드 검색 (Hybrid Search)
+
+**개념**: 유사도 검색 + 키워드 검색 결합
+
+```python
+class HybridSearch:
+    def __init__(self, vector_search, keyword_search):
+        self.vector_search = vector_search
+        self.keyword_search = keyword_search
+
+    def search(self, query: str, alpha: float = 0.5):
+        """
+        하이브리드 검색 수행
+        alpha: 벡터 검색 가중치 (1-alpha: 키워드 검색 가중치)
+        """
+        # 벡터 유사도 검색
+        vector_results = self.vector_search.search(query)
+
+        # 키워드 검색
+        keyword_results = self.keyword_search.search(query)
+
+        # 결과 결합 (가중치 적용)
+        combined_results = self.combine_results(
+            vector_results, keyword_results, alpha
+        )
+
+        return combined_results
+```
+
+### 8.2 쿼리 확장 (Query Expansion)
+
+**개념**: 원본 쿼리를 여러 관련 쿼리로 확장
+
+```python
+class QueryExpander:
+    def expand_query(self, query: str) -> List[str]:
+        """
+        쿼리 확장 기법들
+        """
+        expansions = [query]  # 원본 쿼리 포함
+
+        # 1. 동의어 확장
+        synonyms = self.get_synonyms(query)
+        expansions.extend(synonyms)
+
+        # 2. 하이퍼님 확장
+        hyponyms = self.get_hyponyms(query)
+        expansions.extend(hyponyms)
+
+        # 3. 관련 용어 확장
+        related = self.get_related_terms(query)
+        expansions.extend(related)
+
+        return list(set(expansions))  # 중복 제거
+```
+
+### 8.3 리랭킹 (Re-ranking)
+
+**개념**: 초기 검색 결과를 더 정교한 모델로 재정렬
+
+```python
+class ReRanker:
+    def rerank(self, query: str, candidates: List[Document]) -> List[Document]:
+        """
+        검색 결과를 재정렬
+        """
+        reranked = []
+
+        for doc in candidates:
+            # 더 정교한 유사도 계산
+            score = self.cross_encoder_score(query, doc.content)
+            doc.score = score
+            reranked.append(doc)
+
+        # 점수 기준 정렬
+        reranked.sort(key=lambda x: x.score, reverse=True)
+
+        return reranked
+```
+
+이러한 고급 기법들을 통해 검색 정확도를 더욱 향상시킬 수 있습니다.

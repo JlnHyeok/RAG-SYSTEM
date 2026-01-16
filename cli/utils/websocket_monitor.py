@@ -21,7 +21,7 @@ def await_processing_completion(document_id: str, timeout: int = 600) -> bool:
         nonlocal websocket_working, progress_data, processing_completed, last_message_time, last_printed_ws_progress
         try:
             last_message_time = time.time()
-            print(f"\n📨 WebSocket 메시지 수신: {message}", flush=True)  # 디버깅용
+            # print(f"\n📨 WebSocket 메시지 수신: {message}", flush=True)  # 디버깅용
             data = json.loads(message)
             
             # 진행률 데이터 업데이트

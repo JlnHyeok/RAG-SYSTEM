@@ -28,7 +28,7 @@ class GeminiService:
             genai.configure(api_key=settings.GEMINI_API_KEY)
             
             # 모델 초기화 (환경변수에서 모델명 가져오기, 없으면 기본값 사용)
-            model_name = settings.GEMINI_MODEL or "gemini-2.0-flash-exp"
+            model_name = settings.GEMINI_MODEL or "gemini-2.0-flash-lite"
             self.model = genai.GenerativeModel(model_name)
             
             # 연결 테스트 (선택적)
@@ -50,7 +50,7 @@ class GeminiService:
                 logger.warning(f"Gemini API 할당량 초과, 기본 설정으로 초기화: {e}")
                 # 기본 설정으로라도 초기화
                 genai.configure(api_key=settings.GEMINI_API_KEY)
-                model_name = settings.GEMINI_MODEL or "gemini-2.0-flash-exp"
+                model_name = settings.GEMINI_MODEL or "gemini-2.0-flash-lite"
                 self.model = genai.GenerativeModel(model_name)
                 self._initialized = True
                 logger.info("Gemini API 기본 초기화 완료 (연결 테스트 미실행)")
@@ -176,10 +176,10 @@ class GeminiService:
             
             # 할당량 초과 시 기본 응답
             if self._is_quota_exceeded(e):
-                return self._get_intelligent_fallback_response(user_message, quota_exceeded=True)
+                return "현재 Gemini API 할당량을 초과했습니다. 문서 기반 질문은 여전히 가능하니, 문서를 업로드하고 관련 질문을 해보시겠어요?"
             
-            # 기타 에러 시 기본 응답 반환 (할당량 초과가 아닌 경우)
-            return self._get_intelligent_fallback_response(user_message, quota_exceeded=False)
+            # 기타 에러 시 기본 응답 반환 (재귀 호출 방지)
+            return self._get_basic_fallback_response(user_message)
     
     def _build_rag_prompt(self, question: str, context: str) -> str:
         """RAG용 프롬프트 템플릿 구성"""
@@ -306,63 +306,64 @@ class GeminiService:
         
         return result
     
-    def _get_intelligent_fallback_response(self, user_message: str, quota_exceeded: bool = False) -> str:
-        """지능적인 fallback 응답 생성"""
-        import re
+    async def _get_intelligent_fallback_response(self, user_message: str, quota_exceeded: bool = False) -> str:
+        """지능적인 fallback 응답 생성 - LLM을 활용한 자연어 이해"""
         
-        message_lower = user_message.lower()
-        quota_msg = " 현재 API 할당량 초과로 제한적이지만," if quota_exceeded else ""
-        
-        # 인사 관련 패턴
-        greeting_patterns = ['안녕', '하이', '헬로', '반가', '처음', '시작']
-        if any(pattern in message_lower for pattern in greeting_patterns):
-            return f"안녕하세요! 저는 RAG 기반 AI 어시스턴트입니다.{quota_msg} 문서를 업로드하시면 관련 질문에 답변해드릴 수 있어요."
-        
-        # 정체성/소개 관련 패턴  
-        identity_patterns = ['누구', '뭐야', '뭐하는', '어떤', '소개', '자기소개', '정체', '이름']
-        if any(pattern in message_lower for pattern in identity_patterns):
-            return f"저는 RAG(Retrieval Augmented Generation) 기반 AI 어시스턴트입니다.{quota_msg} 문서를 분석하고 질문에 답변하는 것이 주 기능이에요!"
-        
-        # 기능/능력 관련 패턴 (더 포괄적으로)
-        function_patterns = ['기능', '할 수 있', '능력', '무엇을', '어떻게', '방법', '도움', '지원', '서비스', 
-                           '할수있', '가능한', '제공', '특징', '장점', '용도', '역할', '일', '업무']
-        if any(pattern in message_lower for pattern in function_patterns):
-            quota_note = "\n\n현재 API 할당량 초과이지만 문서 업로드 후 질문해보세요!" if quota_exceeded else "\n\n문서를 업로드하고 관련 질문을 해보세요!"
-            return f"""저의 주요 기능은 다음과 같습니다:
-
-1. 📄 문서 업로드 및 분석 (PDF, Word, 텍스트 등)
-2. 🔍 업로드된 문서에서 정보 검색 및 질의응답
-3. 🌏 다국어 문서 처리 지원 (한국어, 영어 등)
-4. 👁️ OCR을 통한 이미지 내 텍스트 추출
-5. 🎯 벡터 검색 기반 유사도 매칭
-6. ⚡ 실시간 스트리밍 응답{quota_note}"""
-        
-        # 사용법/방법 관련 패턴
-        usage_patterns = ['사용', '이용', '활용', '시작', '설정', '설치', '실행', '작동', '운영']
-        if any(pattern in message_lower for pattern in usage_patterns):
-            return f"""사용 방법은 간단합니다:
-
-1. 📤 문서 업로드: PDF, Word, 텍스트 파일을 시스템에 업로드
-2. ❓ 질문하기: 업로드한 문서에 관련된 질문 입력
-3. 💬 답변 받기: AI가 문서를 분석하여 정확한 답변 제공
-4. 🔄 실시간 대화: 추가 질문으로 더 깊이 있는 정보 탐색{quota_msg}"""
-        
-        # 파일/문서 관련 패턴
-        file_patterns = ['파일', '문서', '업로드', '올리', '지원', '포맷', '형식', '종류']
-        if any(pattern in message_lower for pattern in file_patterns):
-            return f"""지원하는 파일 형식:
-
-📄 문서: PDF, Word (.docx), 텍스트 (.txt)
-🖼️ 이미지: JPG, PNG (OCR로 텍스트 추출)
-📊 기타: 마크다운, CSV 등
-
-최대 50MB까지 업로드 가능합니다.{quota_msg}"""
-        
-        # 기본 응답
+        # API 할당량 초과 시에는 간단한 기본 응답
         if quota_exceeded:
             return "현재 Gemini API 할당량을 초과했습니다. 문서 기반 질문은 여전히 가능하니, 문서를 업로드하고 관련 질문을 해보시겠어요?"
-        else:
-            return "도움이 필요하시면 언제든지 말씀해주세요! 문서를 업로드하신 후 관련 질문을 해보시거나, 저의 기능에 대해 궁금한 점이 있으시면 물어보세요."
+        
+        # LLM이 사용 가능한 경우, 자연어로 의도 파악 후 적절한 응답 생성
+        try:
+            if self._initialized:
+                system_prompt = """당신은 RAG 기반 AI 어시스턴트입니다. 사용자의 메시지 의도를 파악하고 적절한 응답을 생성하세요.
+
+당신의 정보:
+- 이름: RAG 기반 AI 어시스턴트
+- 주요 기능: 문서 업로드 및 분석, 질의응답, 다국어 지원, OCR, 벡터 검색
+- 지원 파일: PDF, Word, 텍스트, 이미지 (최대 50MB)
+- 특징: 실시간 스트리밍, 정확한 정보 검색
+
+응답 가이드라인:
+1. 인사/첫 만남: 간단한 소개와 문서 업로드 안내
+2. 정체성/소개 질문: RAG 시스템과 주요 기능 설명
+3. 기능/사용법 질문: 구체적인 사용 방법과 기능 목록 제공
+4. 파일/문서 관련: 지원 형식과 업로드 방법 안내
+5. 기타: 도움이 되는 일반적인 안내
+
+한국어로 친근하고 도움이 되는 톤으로 응답하세요."""
+
+                response = await self.generate_with_system_prompt(
+                    system_prompt=system_prompt,
+                    user_message=user_message,
+                    max_tokens=300,
+                    temperature=0.7
+                )
+                return response
+                
+        except Exception as e:
+            logger.warning(f"LLM 기반 fallback 응답 생성 실패: {e}")
+        
+        # LLM 실패 시 기본 응답
+        return self._get_basic_fallback_response(user_message)
+    
+    def _get_basic_fallback_response(self, user_message: str) -> str:
+        """기본 fallback 응답 (LLM 실패 시)"""
+        return """안녕하세요! 저는 RAG 기반 AI 어시스턴트입니다.
+
+📄 **주요 기능:**
+• 문서 업로드 및 분석 (PDF, Word, 텍스트 등)
+• 업로드된 문서 기반 질의응답
+• 다국어 문서 처리 지원
+• OCR을 통한 이미지 텍스트 추출
+• 실시간 스트리밍 응답
+
+💡 **사용법:**
+1. 문서를 업로드해주세요
+2. 문서 내용에 대해 자유롭게 질문하세요
+3. 정확한 답변을 받아보세요!
+
+도움이 필요하시면 언제든지 말씀해주세요! 🚀"""
     
     def get_service_info(self) -> dict:
         """서비스 정보 반환"""

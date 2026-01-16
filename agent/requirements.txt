@@ -30,7 +30,7 @@ beautifulsoup4==4.12.2
 
 # 데이터 처리
 pandas==2.1.4
-numpy==1.24.3
+numpy>=1.21.0,<2.0  # NumPy 2.x 호환성 문제 방지
 tiktoken==0.5.2
 
 # 유틸리티
