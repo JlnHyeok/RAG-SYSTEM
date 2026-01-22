@@ -96,7 +96,7 @@ class ProcessingProgress:
             
             # WebSocket 완료 알림 전송
             try:
-                from app.core.websocket_manager import progress_websocket
+                from app.core import progress_websocket
                 
                 try:
                     loop = asyncio.get_running_loop()
@@ -123,7 +123,7 @@ class ProcessingProgress:
             
             # WebSocket 실패 알림 전송
             try:
-                from app.core.websocket_manager import progress_websocket
+                from app.core import progress_websocket
                 
                 try:
                     loop = asyncio.get_running_loop()
@@ -205,7 +205,7 @@ class ProcessingProgress:
     async def _send_websocket_progress_async(self):
         """WebSocket으로 진행률 전송 (비동기)"""
         try:
-            from app.core.websocket_manager import progress_websocket
+            from app.core import progress_websocket
             
             overall_progress = (
                 self.current_step_index + self.step_progress / 100.0

@@ -1,0 +1,2114 @@
+# ------------------------------------------------------
+# THIS FILE WAS AUTOMATICALLY GENERATED (DO NOT MODIFY)
+# ------------------------------------------------------
+
+type Abnormal {
+  """시작 일시"""
+  abnormalBeginDate: DateTime!
+
+  """이상 감지 구분"""
+  abnormalCode: String!
+
+  """상/하한 구분"""
+  abnormalDivision: AbnormalMinMax
+
+  """종료 일시"""
+  abnormalEndDate: DateTime!
+
+  """임계치 데이터 수"""
+  abnormalLossCount: Int
+
+  """임계치"""
+  abnormalThreshold: Float
+
+  """이상 감지 공구"""
+  abnormalTool: String
+
+  """이상 감지 값"""
+  abnormalValue: Float
+
+  """생성 일시"""
+  createAt: DateTime!
+
+  """Feedrate"""
+  feed: Float!
+
+  """FOV(%)"""
+  fov: Float!
+
+  """라인 코드"""
+  lineCode: String!
+
+  """M Code"""
+  mCode: String!
+
+  """설비 코드"""
+  machineCode: String
+
+  """메인 프로그램 번호"""
+  mainProgramNo: String!
+
+  """Tool Offset X Axis"""
+  offsetX: Float!
+
+  """Tool Offset Z Axis"""
+  offsetZ: Float!
+
+  """공정 코드"""
+  opCode: String!
+
+  """생산 번호"""
+  productNo: String!
+
+  """SOV(%)"""
+  sov: Float!
+
+  """서브 프로그램 번호"""
+  subProgramNo: String
+
+  """T Code"""
+  tCode: String!
+
+  """수정 일시"""
+  updateAt: DateTime
+
+  """공장 코드"""
+  workshopCode: String!
+}
+
+type AbnormalAiOutput {
+  """시작 일시"""
+  abnormalAiBeginDate: DateTime
+
+  """종료 일시"""
+  abnormalAiEndDate: DateTime
+
+  """Loss"""
+  abnormalAiValue: Float
+}
+
+type AbnormalDetailOutput {
+  """부하 이상감지 이력"""
+  abnormalAi: [AbnormalAiOutput!]
+
+  """CT 이상 발생 여부"""
+  abnormalCt: String!
+
+  """CT 이상 임계치 (상한)"""
+  abnormalCtThreshold: Float!
+
+  """CT 이상 값"""
+  abnormalCtValue: Float!
+
+  """LoadSum 이상 발생 여부"""
+  abnormalLoad: String!
+
+  """LoadSum 임계치 (상한)"""
+  abnormalLoadThreshold: Float!
+
+  """LoadSum 값"""
+  abnormalLoadValue: Float!
+
+  """CT 이상 임계치 (하한)"""
+  abnormalMinCtThreshold: Float
+
+  """LoadSum 임계치 (하한)"""
+  abnormalMinLoadThreshold: Float
+
+  """부하 데이터"""
+  raws: [RawOutput!]
+}
+
+enum AbnormalMinMax {
+  Max
+  Min
+}
+
+type AbnormalPaginationOutput {
+  """이상감지 이력"""
+  abnormals: [Abnormal!]!
+
+  """총 페이지 수"""
+  pageCount: Int
+}
+
+type AbnormalReportOutput {
+  """이상 감지 구분"""
+  abnormalCode: String!
+
+  """이상 발생 횟수"""
+  abnormalCount: Int!
+
+  """이상 감지 공구"""
+  abnormalTool: String
+}
+
+type AbnormalSubscriptionOutput {
+  """시작 일시"""
+  abnormalBeginDate: DateTime
+
+  """이상 감지 구분"""
+  abnormalCode: String
+
+  """종료 일시"""
+  abnormalEndDate: DateTime
+
+  """이상 감지 공구"""
+  abnormalTool: String
+
+  """이상 감지 값"""
+  abnormalValue: Float
+}
+
+type AbnormalSummary {
+  """부하 이상 발생 여부"""
+  abnormalAi: String!
+
+  """임계치 데이터 수"""
+  abnormalAiCount: Int
+
+  """부하 이상 임계치"""
+  abnormalAiThreshold: Float!
+
+  """부하 이상 값"""
+  abnormalAiValue: Int!
+
+  """시작 일시"""
+  abnormalBeginDate: DateTime!
+
+  """CT 이상 발생 여부"""
+  abnormalCt: String!
+
+  """CT 이상 임계치"""
+  abnormalCtThreshold: Float!
+
+  """CT 이상 값"""
+  abnormalCtValue: Float!
+
+  """종료 일시"""
+  abnormalEndDate: DateTime!
+
+  """LoadSum 이상 발생 여부"""
+  abnormalLoad: String!
+
+  """LoadSum 임계치"""
+  abnormalLoadThreshold: Float!
+
+  """LoadSum 값"""
+  abnormalLoadValue: Float!
+
+  """CT 이상 임계치"""
+  abnormalMinCtThreshold: Float
+
+  """LoadSum 임계치"""
+  abnormalMinLoadThreshold: Float
+
+  """생성 일시"""
+  createAt: DateTime!
+
+  """Feedrate"""
+  feed: Float!
+
+  """FOV(%)"""
+  fov: Float!
+
+  """라인 코드"""
+  lineCode: String!
+
+  """M Code"""
+  mCode: String!
+
+  """설비 코드"""
+  machineCode: String
+
+  """메인 프로그램 번호"""
+  mainProgramNo: String!
+
+  """Tool Offset X Axis"""
+  offsetX: Float!
+
+  """Tool Offset Z Axis"""
+  offsetZ: Float!
+
+  """공정 코드"""
+  opCode: String!
+
+  """생산 번호"""
+  productNo: String!
+
+  """SOV(%)"""
+  sov: Float!
+
+  """서브 프로그램 번호"""
+  subProgramNo: String
+
+  """T Code"""
+  tCode: String!
+
+  """수정 일시"""
+  updateAt: DateTime
+
+  """공장 코드"""
+  workshopCode: String!
+}
+
+type AbnormalSummaryPaginationOutput {
+  """이상감지 이력"""
+  abnormals: [AbnormalSummary!]!
+
+  """총 페이지 수"""
+  pageCount: Int
+}
+
+input CreateLineInput {
+  """라인 코드"""
+  lineCode: String!
+
+  """라인명"""
+  lineName: String!
+
+  """공장 코드"""
+  workshopCode: String!
+}
+
+input CreateMachineInput {
+  """라인 코드"""
+  lineCode: String!
+
+  """설비 코드"""
+  machineCode: String!
+
+  """설비 IP"""
+  machineIp: String!
+
+  """설비명"""
+  machineName: String!
+
+  """설비 포트"""
+  machinePort: Int!
+
+  """공정 코드"""
+  opCode: String!
+
+  """공장 코드"""
+  workshopCode: String!
+}
+
+input CreateOperationInput {
+  """라인 코드"""
+  lineCode: String!
+
+  """공정 코드"""
+  opCode: String!
+
+  """공정명"""
+  opName: String!
+
+  """공장 코드"""
+  workshopCode: String!
+}
+
+input CreateThresholdInput {
+  """라인 코드"""
+  lineCode: String
+
+  """설비 코드"""
+  machineCode: String
+
+  """C/T 임계치 상한값"""
+  maxThresholdCt: Float
+
+  """LoadSum 임계치 상한값"""
+  maxThresholdLoad: Float
+
+  """C/T 임계치 하한값"""
+  minThresholdCt: Float
+
+  """LoadSum 임계치 하한값"""
+  minThresholdLoad: Float
+
+  """공정 코드"""
+  opCode: String
+
+  """AI 예측 구간"""
+  predictPeriod: Float
+
+  """추가 설명"""
+  remark: String
+
+  """선택 결과"""
+  selected: String
+
+  """오차율 임계치"""
+  thresholdLoss: Float
+
+  """Tool1 임계치"""
+  tool1Threshold: Float
+
+  """Tool2 임계치"""
+  tool2Threshold: Float
+
+  """Tool3 임계치"""
+  tool3Threshold: Float
+
+  """Tool4 임계치"""
+  tool4Threshold: Float
+
+  """공장 코드"""
+  workshopCode: String
+}
+
+input CreateToolChangeInput {
+  """공구 교체 일시"""
+  changeDate: Float
+
+  """라인 코드"""
+  lineCode: String!
+
+  """설비 코드"""
+  machineCode: String
+
+  """공정 코드"""
+  opCode: String!
+
+  """공구 교체 사유 코드"""
+  reasonCode: String!
+
+  """공구 번호"""
+  toolCode: String!
+
+  """사용 수량"""
+  useCount: Float
+
+  """공장 코드"""
+  workshopCode: String!
+}
+
+type CreateToolChangeOutput {
+  """공구 교체 일시"""
+  changeDate: DateTime
+
+  """에러 코드"""
+  errorCode: ErrorCode
+
+  """에러 내용"""
+  errorMsg: String
+
+  """성공 여부"""
+  isSuccess: Boolean
+
+  """공구 교체 사유 코드"""
+  reasonCode: String
+
+  """공구 번호"""
+  toolCode: String
+
+  """공구 사용 수량"""
+  toolUseCount: Int
+}
+
+input CreateToolInput {
+  """설비 코드"""
+  machineCode: String!
+
+  """한계 수명"""
+  maxCount: Int!
+
+  """공구 번호"""
+  toolCode: String!
+
+  """공구명"""
+  toolName: String!
+
+  """공구 순서"""
+  toolOrder: Int!
+
+  """경고 임계치"""
+  warnRate: Float!
+}
+
+input CreateUserInput {
+  """사용자 ID"""
+  userId: String!
+
+  """사용자 이름"""
+  userName: String!
+
+  """사용자 권한"""
+  userRole: Int!
+}
+
+input CreateWorkshopInput {
+  """공장 코드"""
+  workshopCode: String!
+
+  """공장명"""
+  workshopName: String!
+}
+
+"""
+A date-time string at UTC, such as 2019-12-03T09:54:33Z, compliant with the date-time format.
+"""
+scalar DateTime
+
+enum ErrorCode {
+  DUPLICATED
+  ETC
+}
+
+input FilterAbnormalDetailInput {
+  """라인 코드"""
+  lineId: String
+
+  """설비 코드"""
+  machineId: String
+
+  """공정 코드"""
+  opCode: String
+
+  """제품 정보"""
+  productNo: String!
+
+  """공장 코드"""
+  workshopId: String
+}
+
+input FilterAbnormalInput {
+  """이상감지 구분"""
+  abnormalCode: String
+
+  """공통 필터"""
+  commonFilter: FilterCommonInput!
+
+  """조회 데이터 수"""
+  count: Int
+
+  """필터 문구"""
+  filterKeyword: String
+
+  """조회 페이지"""
+  page: Int
+
+  """생산 번호"""
+  productNo: String
+
+  """조회 종료 일시"""
+  rangeEnd: DateTime
+
+  """조회 시작 일시"""
+  rangeStart: DateTime
+
+  """정렬 정보"""
+  sortInput: SortCommonInput
+}
+
+input FilterAbnormalReportInput {
+  """공통 필터"""
+  commonFilter: FilterCommonInput!
+
+  """조회 종료 일시"""
+  rangeEnd: DateTime!
+
+  """조회 시작 일시"""
+  rangeStart: DateTime!
+}
+
+input FilterCommonInput {
+  """라인 코드"""
+  lineId: String!
+
+  """설비 코드"""
+  machineId: String
+
+  """공정 코드"""
+  opCode: String!
+
+  """공장 코드"""
+  workshopId: String!
+}
+
+input FilterInfluxTagInput {
+  """Tag 명"""
+  tagName: String!
+
+  """Tag 값"""
+  tagValue: String!
+}
+
+input FilterLineInput {
+  """라인 코드"""
+  lineCode: String
+
+  """공장 코드"""
+  workshopCode: String
+}
+
+input FilterMachineInput {
+  """라인 코드"""
+  lineCode: String
+
+  """공정 코드"""
+  opCode: String
+
+  """공장 코드"""
+  workshopCode: String
+}
+
+input FilterOperationInput {
+  """라인 코드"""
+  lineCode: String
+
+  """공장 코드"""
+  workshopCode: String
+}
+
+input FilterProductInfluxInput {
+  """통계 구분"""
+  aggregateInterval: String
+
+  """공통 필터"""
+  commonFilter: FilterCommonInput!
+
+  """조회 시작 일시"""
+  rangeStart: DateTime
+
+  """조회 시작 일시 (상대 시간 문자열)"""
+  rangeStartString: String
+
+  """조회 종료 일시"""
+  rangeStop: DateTime
+
+  """조회 Tag"""
+  tags: [FilterInfluxTagInput!]
+}
+
+input FilterProductInput {
+  """공통 필터"""
+  commonFilter: FilterCommonInput!
+
+  """조회 데이터 수"""
+  count: Int
+
+  """필터 문구"""
+  filterKeyword: String
+
+  """필터 구분"""
+  filterResult: String
+
+  """조회 페이지"""
+  page: Int
+
+  """생산 번호"""
+  productNo: String
+
+  """조회 종료 일시"""
+  rangeEnd: DateTime
+
+  """조회 시작 일시"""
+  rangeStart: DateTime
+
+  """정렬 정보"""
+  sortInput: SortCommonInput
+}
+
+input FilterProductSumReportInput {
+  """공통 필터"""
+  commonFilter: FilterCommonInput!
+
+  """기간 구분"""
+  periodType: PeriodType!
+
+  """조회 시작 일시"""
+  rangeStart: DateTime
+
+  """조회 종료 일시"""
+  rangeStop: DateTime
+}
+
+input FilterRawInput {
+  """통계 구분"""
+  aggregateInterval: String
+
+  """공통 필터"""
+  commonFilter: FilterCommonInput!
+
+  """조회 시작 일시"""
+  rangeStart: DateTime
+
+  """조회 시작 일시 (상대 시간 문자열)"""
+  rangeStartString: String
+
+  """조회 종료 일시"""
+  rangeStop: DateTime
+
+  """조회 Tag"""
+  tags: [FilterInfluxTagInput!]
+}
+
+input FilterRawTCodeInput {
+  """공구 번호"""
+  TCode: String!
+
+  """통계 구분"""
+  aggregateInterval: String
+
+  """공통 필터"""
+  commonFilter: FilterCommonInput!
+
+  """제품 코드"""
+  productNo: [String!]
+
+  """조회 시작 일시 (상대 시간 문자열)"""
+  rangeStartString: String
+}
+
+input FilterThresholdInput {
+  """라인 코드"""
+  lineCode: String
+
+  """설비 코드"""
+  machineCode: String
+
+  """공정 코드"""
+  opCode: String
+
+  """공장 코드"""
+  workshopCode: String
+}
+
+input FilterToolChangeAvgReportInput {
+  """라인 코드"""
+  lineId: String
+
+  """설비 코드"""
+  machineId: String
+
+  """공정 코드"""
+  opCode: String
+
+  """조회 종료 일시"""
+  rangeEnd: DateTime
+
+  """조회 시작 일시"""
+  rangeStart: DateTime
+
+  """공장 코드"""
+  workshopId: String
+}
+
+input FilterToolChangeReportInput {
+  """조회 시작 월"""
+  beginMonth: Int!
+
+  """조회 시작 년도"""
+  beginYear: Int!
+
+  """조회 종료 월"""
+  endMonth: Int!
+
+  """조회 종료 년도"""
+  endYear: Int!
+
+  """라인 코드"""
+  lineId: String
+
+  """설비 코드"""
+  machineId: String
+
+  """공정 코드"""
+  opCode: String
+
+  """공장 코드"""
+  workshopId: String
+}
+
+input FilterToolCodeInput {
+  """설비 코드"""
+  machineCode: String!
+
+  """공구 번호"""
+  toolCode: String!
+}
+
+input FilterToolHistoryInfluxInput {
+  """통계 구분"""
+  aggregateInterval: String
+
+  """공통 필터"""
+  commonFilter: FilterCommonInput!
+
+  """조회 시작 일시"""
+  rangeStart: DateTime
+
+  """조회 시작 일시 (상대 시간 문자열)"""
+  rangeStartString: String
+
+  """조회 종료 일시"""
+  rangeStop: DateTime
+
+  """조회 Tag"""
+  tags: [FilterInfluxTagInput!]
+}
+
+input FilterToolInput {
+  """설비 코드"""
+  machineCode: String
+}
+
+input FilterUserInput {
+  """사용자 ID 목록"""
+  userIds: [String!]!
+}
+
+input FilterWorkshopInput {
+  """공장 코드 목록"""
+  workshopCodes: [String!]!
+}
+
+type Line {
+  """생성 일시"""
+  createAt: DateTime!
+
+  """라인 코드"""
+  lineCode: String!
+
+  """라인명"""
+  lineName: String!
+
+  """수정 일시"""
+  updateAt: DateTime
+
+  """공장 코드"""
+  workshopCode: String!
+}
+
+type LineListOutput {
+  """라인 코드"""
+  lineCode: String
+
+  """라인명"""
+  lineTitle: String
+
+  """공정 배열"""
+  operationList: [OperationListOutput!]
+}
+
+type LineMonitorOutput {
+  """라인 코드"""
+  lineCode: String!
+
+  """라인 명"""
+  lineName: String!
+
+  """공정 데이터 배열"""
+  operationMonitors: [MonitorOutput!]
+}
+
+type LineMutationOutput {
+  """생성 일시"""
+  createAt: DateTime
+
+  """에러 코드"""
+  errorCode: ErrorCode
+
+  """에러 내용"""
+  errorMsg: String
+
+  """성공 여부"""
+  isSuccess: Boolean
+
+  """라인 코드"""
+  lineCode: String
+
+  """라인명"""
+  lineName: String
+
+  """수정 일시"""
+  updateAt: DateTime
+
+  """공장 코드"""
+  workshopCode: String
+}
+
+input LoginUserInput {
+  """비밀번호"""
+  password: String!
+
+  """사용자 ID"""
+  userId: String!
+}
+
+type LoginUserOutput {
+  """Access Token"""
+  accessToken: String
+
+  """로그인 성공 여부"""
+  isSuccess: Boolean!
+
+  """로그인 일시"""
+  loginDate: DateTime
+
+  """비밀번호 재설정 여부"""
+  resetFlag: String
+}
+
+type LogoutUserOutput {
+  """로그 아웃 성공 여부"""
+  isSuccess: Boolean!
+
+  """로그 아웃 일시"""
+  logoutDate: DateTime
+}
+
+type Machine {
+  """생성 일시"""
+  createAt: DateTime!
+
+  """라인 코드"""
+  lineCode: String!
+
+  """설비 코드"""
+  machineCode: String!
+
+  """설비 IP"""
+  machineIp: String!
+
+  """설비명"""
+  machineName: String!
+
+  """설비 포트"""
+  machinePort: Int!
+
+  """공정 코드"""
+  opCode: String!
+
+  """수정 일시"""
+  updateAt: DateTime
+
+  """공장 코드"""
+  workshopCode: String!
+}
+
+type MachineListOutput {
+  """설비 코드"""
+  machineCode: String!
+
+  """설비명"""
+  machineTitle: String!
+}
+
+type MachineMutationOutput {
+  """생성 일시"""
+  createAt: DateTime
+
+  """에러 코드"""
+  errorCode: ErrorCode
+
+  """에러 내용"""
+  errorMsg: String
+
+  """성공 여부"""
+  isSuccess: Boolean
+
+  """라인 코드"""
+  lineCode: String
+
+  """설비 코드"""
+  machineCode: String
+
+  """설비 IP"""
+  machineIp: String
+
+  """설비명"""
+  machineName: String
+
+  """설비 포트"""
+  machinePort: Int
+
+  """공정 코드"""
+  opCode: String
+
+  """수정 일시"""
+  updateAt: DateTime
+
+  """공장 코드"""
+  workshopCode: String
+}
+
+type MachineQueryOutput {
+  """생성 일시"""
+  createAt: DateTime!
+
+  """라인 코드"""
+  lineCode: String!
+
+  """설비 코드"""
+  machineCode: String!
+
+  """설비 IP"""
+  machineIp: String!
+
+  """설비명"""
+  machineName: String!
+
+  """설비 포트"""
+  machinePort: Int!
+
+  """공정 코드"""
+  opCode: String!
+
+  """공정명"""
+  opName: String!
+
+  """수정 일시"""
+  updateAt: DateTime
+
+  """공장 코드"""
+  workshopCode: String!
+}
+
+type MonitorOutput {
+  """공정 코드"""
+  opCode: String!
+
+  """공정명"""
+  opName: String!
+
+  """가동 시간(ms)"""
+  operationTime: Int!
+
+  """CNC 파라미터 정보"""
+  parameter: RawOutput
+
+  """생산 정보"""
+  product: ProductLastOutput
+
+  """공구 정보"""
+  toolCount: [ToolCountLastOutput!]
+}
+
+type Mutation {
+  createLine(createLineInput: CreateLineInput!): LineMutationOutput!
+  createMachine(createMachineInput: CreateMachineInput!): MachineMutationOutput!
+  createOperation(createOperationInput: CreateOperationInput!): OperationMutationOutput!
+  createThreshold(createThresholdInput: CreateThresholdInput!): ThresholdMutationOutput!
+  createTool(createToolInput: CreateToolInput!): ToolMutationOutput!
+  createToolChange(createToolChangeInput: CreateToolChangeInput!): CreateToolChangeOutput!
+  createUser(createUserInput: CreateUserInput!): UserMutationOutput!
+  createWorkshop(createWorkshopInput: CreateWorkshopInput!): WorkshopMutationOutput!
+  deleteLine(lineCode: String!): LineMutationOutput!
+  deleteMachine(machineCode: String!): MachineMutationOutput!
+  deleteOperation(opCode: String!): OperationMutationOutput!
+  deleteThreshold(thresholdId: String!): ThresholdMutationOutput!
+  deleteTool(filterToolCodeInput: FilterToolCodeInput!): ToolMutationOutput!
+  deleteUser(userId: String!): UserMutationOutput!
+  deleteWorkshop(workshopCode: String!): WorkshopMutationOutput!
+  login(loginUserInput: LoginUserInput!): LoginUserOutput!
+  logout(userId: String!): LogoutUserOutput!
+  resetPassword(userId: String!): UserMutationOutput!
+  updateLine(lineCode: String!, updateLineInput: UpdateLineInput!): LineMutationOutput!
+  updateMachine(machineCode: String!, updateMachineInput: UpdateMachineInput!): MachineMutationOutput!
+  updateOperation(opCode: String!, updateOperationInput: UpdateOperationInput!): OperationMutationOutput!
+  updateThreshold(thresholdId: String!, updateThresholdInput: UpdateThresholdInput!): ThresholdMutationOutput!
+  updateThresholdAll(updateThresholdInput: [UpdateMultiThresholdInput!]!): ThresholdMutationOutput!
+  updateTool(filterToolCodeInput: FilterToolCodeInput!, updateToolInput: UpdateToolInput!): ToolMutationOutput!
+  updateUser(updateUserInput: UpdateUserInput!, userId: String!): UserMutationOutput!
+  updateWorkshop(updateWorkshopInput: UpdateWorkshopInput!, workshopCode: String!): WorkshopMutationOutput!
+}
+
+type Operation {
+  """생성 일시"""
+  createAt: DateTime!
+
+  """라인 코드"""
+  lineCode: String!
+
+  """공정 코드"""
+  opCode: String!
+
+  """공정명"""
+  opName: String!
+
+  """수정 일시"""
+  updateAt: DateTime
+
+  """공장 코드"""
+  workshopCode: String!
+}
+
+type OperationListOutput {
+  """설비 배열"""
+  machineList: [MachineListOutput!]
+
+  """공정 코드"""
+  operationCode: String!
+
+  """공정명"""
+  operationTitle: String!
+}
+
+type OperationMutationOutput {
+  """생성 일시"""
+  createAt: DateTime
+
+  """에러 코드"""
+  errorCode: ErrorCode
+
+  """에러 내용"""
+  errorMsg: String
+
+  """성공 여부"""
+  isSuccess: Boolean
+
+  """라인 코드"""
+  lineCode: String
+
+  """공정 코드"""
+  opCode: String
+
+  """공정명"""
+  opName: String
+
+  """수정 일시"""
+  updateAt: DateTime
+
+  """공장 코드"""
+  workshopCode: String
+}
+
+enum PeriodType {
+  Daily
+  Monthly
+  Weekly
+  Yearly
+}
+
+type Product {
+  """AI 분석 결과"""
+  ai: Float!
+
+  """생산 결과"""
+  aiResult: String!
+
+  """생산 완료 상태"""
+  completeStatus: Int
+
+  """생산 수량"""
+  count: Int!
+
+  """생성 일시"""
+  createAt: DateTime!
+
+  """Cycle Time"""
+  ct: Float!
+
+  """생산 결과"""
+  ctResult: String!
+
+  """종료 일시"""
+  endTime: DateTime!
+
+  """Feedrate"""
+  feed: Float!
+
+  """FOV(%)"""
+  fov: Float!
+
+  """라인 코드"""
+  lineCode: String!
+
+  """부하 Sum"""
+  loadSum: Float!
+
+  """생산 결과"""
+  loadSumResult: String!
+
+  """M Code"""
+  mCode: String!
+
+  """설비 코드"""
+  machineCode: String
+
+  """메인 프로그램 번호"""
+  mainProgramNo: String!
+
+  """Tool Offset X Axis"""
+  offsetX: Float!
+
+  """Tool Offset Z Axis"""
+  offsetZ: Float!
+
+  """공정 코드"""
+  opCode: String!
+
+  """생산 번호"""
+  productNo: String!
+
+  """생산 결과"""
+  productResult: String!
+
+  """SOV(%)"""
+  sov: Float!
+
+  """시작 일시"""
+  startTime: DateTime!
+
+  """서브 프로그램 번호"""
+  subProgramNo: String!
+
+  """T Code"""
+  tCode: String!
+
+  """수정 일시"""
+  updateAt: DateTime
+
+  """공장 코드"""
+  workshopCode: String!
+}
+
+type ProductAbnormalOutput {
+  """이상감지 이력"""
+  abnormals: [Abnormal!]!
+
+  """AI 분석 결과"""
+  productAi: Float!
+
+  """생산 결과"""
+  productAiResult: String!
+
+  """생산 시작 일시"""
+  productBeginDate: DateTime!
+
+  """생산 완료 상태"""
+  productCompleteStatus: Int
+
+  """Cycle Time"""
+  productCt: Float!
+
+  """생산 결과"""
+  productCtResult: String!
+
+  """생산 종료 일시"""
+  productEndDate: DateTime!
+
+  """부하 Sum"""
+  productLoadSum: Float!
+
+  """부하 Sum"""
+  productLoadSumResult: String!
+
+  """생산 번호"""
+  productNo: String!
+
+  """생산 결과"""
+  productResult: String!
+}
+
+type ProductInfluxOutput {
+  """Cycle Time"""
+  CT: Float!
+
+  """생산 수량"""
+  Count: Int!
+
+  """라인 코드"""
+  LineCode: String
+
+  """부하 Sum"""
+  LoadSum: Float!
+
+  """설비 코드"""
+  MachineCode: String
+
+  """공정 코드"""
+  OpCode: String
+
+  """공장 코드"""
+  WorkshopCode: String
+
+  """수집 일시"""
+  time: DateTime!
+}
+
+type ProductLastOutput {
+  """AI 분석 결과"""
+  productAi: Float!
+
+  """평균 Cycle Time"""
+  productAvgCt: Float!
+
+  """평균 Cycle Time"""
+  productAvgLoadSum: Float
+
+  """생산 시작 일시"""
+  productBeginDate: DateTime!
+
+  """생산 완료 상태"""
+  productCompleteStatus: Int
+
+  """Cycle Time"""
+  productCt: Float!
+
+  """평균 Cycle Time"""
+  productDailyCount: Float!
+
+  """생산 종료 일시"""
+  productEndDate: DateTime!
+
+  """부하 Sum"""
+  productLoadSum: Float!
+
+  """생산 번호"""
+  productNo: String!
+}
+
+type ProductPaginationOutput {
+  """총 페이지 수"""
+  pageCount: Int
+
+  """생산 이력"""
+  products: [Product!]!
+}
+
+type ProductSubscriptionOutput {
+  """AI 분석 결과"""
+  productAi: Float
+
+  """Cycle Time 이상 유무"""
+  productAiResult: String
+
+  """평균 Cycle Time"""
+  productAvgCt: Float!
+
+  """평균 Cycle Time"""
+  productAvgLoadSum: Float
+
+  """생산 시작 일시"""
+  productBeginDate: DateTime!
+
+  """생산 완료 상태"""
+  productCompleteStatus: Int
+
+  """당일 생산 수량"""
+  productCount: Int!
+
+  """Cycle Time"""
+  productCt: Float!
+
+  """Cycle Time 이상 유무"""
+  productCtResult: String!
+
+  """생산 종료 일시"""
+  productEndDate: DateTime!
+
+  """부하 Sum"""
+  productLoadSum: Float!
+
+  """부하 Sum 이상 유무"""
+  productLoadSumResult: String!
+
+  """생산 번호"""
+  productNo: String!
+
+  """생산 결과"""
+  productResult: String!
+}
+
+type ProductSumReportOutput {
+  """생산 수량"""
+  Count: Int!
+
+  """라인 코드"""
+  LineCode: String!
+
+  """설비 코드"""
+  MachineCode: String!
+
+  """공정 코드"""
+  OpCode: String!
+
+  """공장 코드"""
+  WorkshopCode: String!
+
+  """수집 일시"""
+  time: DateTime!
+}
+
+type Query {
+  abnormalDetail(filterAbnormalDetailInput: FilterAbnormalDetailInput!): AbnormalDetailOutput!
+  abnormalReports(filterAbnoramlInput: FilterAbnormalReportInput!): [AbnormalReportOutput!]!
+  abnormalSummary(filterAbnoramlInput: FilterAbnormalInput): AbnormalSummaryPaginationOutput!
+  abnormals(filterAbnoramlInput: FilterAbnormalInput): AbnormalPaginationOutput!
+  lastProduct(filterCommonInput: FilterCommonInput!): ProductLastOutput!
+  lastRaw(filterCommonInput: FilterCommonInput!): RawOutput!
+  line(lineCode: String!): Line!
+  lines(filterLineInput: FilterLineInput): [Line!]!
+  machine(machineCode: String!): Machine!
+  machines(filterMachineInput: FilterMachineInput): [MachineQueryOutput!]!
+  monitorCnc(filterCommonInput: FilterCommonInput!): MonitorOutput!
+  monitorLine(lineCode: String!): LineMonitorOutput!
+  monitorWorkshop(workshopCode: String!): WorkshopMonitorOutput!
+  operation(opCode: String!): Operation!
+  operationSumReports(filterProductSumReportInput: FilterProductSumReportInput!): [RawOperationPeriodReportOutput!]!
+  operations(filterOperationInput: FilterOperationInput): [Operation!]!
+  productAbnormals(filterProductInput: FilterProductInput!): [ProductAbnormalOutput!]!
+  productInfoReports(filterProductInfluxInput: FilterProductInfluxInput!): [ProductInfluxOutput!]!
+  productSumReports(filterProductSumReportInput: FilterProductSumReportInput!): [ProductSumReportOutput!]!
+  products(filterProductInput: FilterProductInput): ProductPaginationOutput!
+  raw(filterDate: DateTime!): RawOutput!
+  rawTCodeRange(filterRawTCodeInput: FilterRawTCodeInput!): RawTCodeOutput!
+  raws(filterRawInput: FilterRawInput!): [RawOutput!]!
+  thresholds(filterThresholdInput: FilterThresholdInput): [ThresholdQueryOutput!]!
+  tool(filterToolCodeInput: FilterToolCodeInput!): Tool!
+  toolChangeAverageMonthlyReports(filterToolReportInput: FilterToolChangeReportInput!): [ToolChangeAverageMonthlyReportOutput!]!
+  toolChangeAverageReports(filterToolAvgReportInput: FilterToolChangeAvgReportInput!): [ToolChangeAverageReportOutput!]!
+  toolChangeLastReports(filterCommonInput: FilterCommonInput!): [ToolChangeLastReportOutput!]!
+  toolChangeSumReports(filterToolReportInput: FilterToolChangeReportInput!): [ToolChangeSumReportOutput!]!
+  toolHistory: [ToolHistory!]!
+  toolHistoryReports(filterProductInfluxInput: FilterToolHistoryInfluxInput!): [ToolHistoryInfluxOutput!]!
+  tools(filterToolInput: FilterToolInput): [Tool!]!
+  user(userId: String!): User!
+  users(filterUserInput: FilterUserInput): [User!]!
+  workshop(workshopCode: String!): Workshop!
+  workshopListOutput: [WorkshopListOutput!]!
+  workshops(filterWorkshopInput: FilterWorkshopInput): [Workshop!]!
+}
+
+type RawOperationPeriodReportOutput {
+  """라인 코드"""
+  LineCode: String!
+
+  """설비 코드"""
+  MachineCode: String!
+
+  """공정 코드"""
+  OpCode: String!
+
+  """가동 시간(ms)"""
+  Run: Int!
+
+  """공장 코드"""
+  WorkshopCode: String!
+
+  """수집 일시"""
+  time: DateTime!
+}
+
+type RawOutput {
+  """Feed"""
+  Feed: Float!
+
+  """FOV(%)"""
+  Fov: Float!
+
+  """Index"""
+  Index: Int!
+
+  """라인 코드"""
+  LineCode: String!
+
+  """Spindle 부하 (수집)"""
+  Load: Float!
+
+  """오차율"""
+  Loss: Float
+
+  """M Code"""
+  MCode: String!
+
+  """설비 코드"""
+  MachineCode: String!
+
+  """메인 프로그램 번호"""
+  MainProgram: String!
+
+  """공정 코드"""
+  OpCode: String!
+
+  """Spindle 부하 (예측)"""
+  Predict: Float
+
+  """제품 코드"""
+  ProductId: String!
+
+  """설비 상태"""
+  Run: String!
+
+  """Tool Offset X Axis"""
+  SV_X_Offset: Float!
+
+  """X 상대 좌표"""
+  SV_X_Pos: Float!
+
+  """Tool Offset Z Axis"""
+  SV_Z_Offset: Float!
+
+  """Z 상대 좌표"""
+  SV_Z_Pos: Float!
+
+  """SOV(%)"""
+  Sov: Float!
+
+  """서브 프로그램 번호"""
+  SubProgram: String!
+
+  """T Code"""
+  TCode: String!
+
+  """공구 사용 수량 1"""
+  TCount1: Float!
+
+  """공구 사용 수량 1"""
+  TCount2: Float!
+
+  """공구 사용 수량 1"""
+  TCount3: Float!
+
+  """공구 사용 수량 1"""
+  TCount4: Float!
+
+  """공장 코드"""
+  WorkshopCode: String!
+
+  """수집 일시"""
+  time: DateTime!
+}
+
+type RawTCodeOutput {
+  """T Code"""
+  TCode: String!
+
+  """T Code 사용 범위"""
+  TCodeRange: [RawTCodeSingleOutput!]!
+}
+
+type RawTCodeSingleOutput {
+  """공구 사용 시작 IDX"""
+  beginIdx: Int
+
+  """공구 사용 시작 일시"""
+  beginTime: DateTime
+
+  """공구 사용 종료 IDX"""
+  endIdx: Int
+
+  """공구 사용 종료 일시"""
+  endTime: DateTime
+
+  """제품 번호"""
+  productNo: String
+}
+
+input SortCommonInput {
+  """정렬 대상 항목"""
+  sortColumn: String!
+
+  """정렬 방향"""
+  sortDirection: String!
+}
+
+type Subscription {
+  monitorAbnormal(filterCommonInput: FilterCommonInput!): AbnormalSubscriptionOutput!
+  monitorProduct(filterCommonInput: FilterCommonInput!): ProductSubscriptionOutput!
+  monitorToolCount(filterCommonInput: FilterCommonInput!): [ToolCountLastOutput!]!
+}
+
+type ThresholdMutationOutput {
+  """생성 일시"""
+  createAt: DateTime
+
+  """에러 코드"""
+  errorCode: ErrorCode
+
+  """에러 내용"""
+  errorMsg: String
+
+  """성공 여부"""
+  isSuccess: Boolean
+
+  """설비 코드"""
+  machineCode: String
+
+  """C/T 임계치"""
+  maxThresholdCt: Float
+
+  """LoadSum 임계치"""
+  maxThresholdLoad: Float
+
+  """C/T 임계치 하한값"""
+  minThresholdCt: Float
+
+  """LoadSum 임계치 하한값"""
+  minThresholdLoad: Float
+
+  """AI 예측 구간"""
+  predictPeriod: Float
+
+  """추가 설명"""
+  remark: String
+
+  """선택 결과"""
+  selected: String
+
+  """임계치 아이디"""
+  thresholdId: String
+
+  """오차율 임계치"""
+  thresholdLoss: Float
+
+  """Tool1 임계치"""
+  tool1Threshold: Float
+
+  """Tool2 임계치"""
+  tool2Threshold: Float
+
+  """Tool3 임계치"""
+  tool3Threshold: Float
+
+  """Tool4 임계치"""
+  tool4Threshold: Float
+
+  """수정 일시"""
+  updateAt: DateTime
+}
+
+type ThresholdQueryOutput {
+  """생성 일시"""
+  createAt: DateTime
+
+  """라인 코드"""
+  lineCode: String
+
+  """설비 코드"""
+  machineCode: String!
+
+  """공정 코드"""
+  machineName: String!
+
+  """C/T 임계치 상한값"""
+  maxThresholdCt: Float
+
+  """LoadSum 임계치 상한값"""
+  maxThresholdLoad: Float
+
+  """C/T 임계치 하한값"""
+  minThresholdCt: Float
+
+  """LoadSum 임계치 하한값"""
+  minThresholdLoad: Float
+
+  """공정 코드"""
+  opCode: String!
+
+  """공정 코드"""
+  opName: String!
+
+  """AI 예측 구간"""
+  predictPeriod: Float
+
+  """추가 설명"""
+  remark: String
+
+  """선택 결과"""
+  selected: String
+
+  """임계치 아이디"""
+  thresholdId: String
+
+  """오차율 임계치"""
+  thresholdLoss: Float
+
+  """Tool1 공구명"""
+  tool1Name: String
+
+  """Tool1 임계치"""
+  tool1Threshold: Float
+
+  """Tool2 공구명"""
+  tool2Name: String
+
+  """Tool2 임계치"""
+  tool2Threshold: Float
+
+  """Tool3 공구명"""
+  tool3Name: String
+
+  """Tool3 임계치"""
+  tool3Threshold: Float
+
+  """Tool4 공구명"""
+  tool4Name: String
+
+  """Tool4 임계치"""
+  tool4Threshold: Float
+
+  """수정 일시"""
+  updateAt: DateTime
+
+  """공장 코드"""
+  workshopCode: String
+}
+
+type Tool {
+  """생성 일시"""
+  createAt: DateTime!
+
+  """설비 코드"""
+  machineCode: String!
+
+  """한계 수명"""
+  maxCount: Int!
+
+  """예비 공구 번호"""
+  subToolCode: String
+
+  """공구 번호"""
+  toolCode: String!
+
+  """공구명"""
+  toolName: String!
+
+  """공구 순서"""
+  toolOrder: Int!
+
+  """수정 일시"""
+  updateAt: DateTime
+
+  """경고 임계치"""
+  warnRate: Float!
+}
+
+type ToolChangeAverageMonthlyReportOutput {
+  """집계 일자"""
+  reportDate: String!
+
+  """공구 사용 집계"""
+  toolUseCount: [ToolChangeAverageReportOutput!]!
+}
+
+type ToolChangeAverageReportOutput {
+  """공구 교체 횟수"""
+  changeCount: Int!
+
+  """공구 번호"""
+  toolCode: String!
+
+  """공구명"""
+  toolName: String!
+
+  """평균 사용 수량"""
+  toolUseCountAvg: Float!
+}
+
+type ToolChangeLastReportOutput {
+  """공구 교체 일시"""
+  changeDate: DateTime
+
+  """공구 교체 사유 코드"""
+  reasonCode: String!
+
+  """공구 번호"""
+  toolCode: String!
+
+  """공구명"""
+  toolName: String!
+
+  """공구 사용 수량"""
+  toolUseCount: Int!
+
+  """평균 사용 수량"""
+  toolUseCountAvg: Float!
+}
+
+type ToolChangeSumOutput {
+  """공구 번호"""
+  toolCode: String!
+
+  """공구명"""
+  toolName: String!
+
+  """공구 사용 수량"""
+  toolUseCountSum: Float!
+}
+
+type ToolChangeSumReportOutput {
+  """집계 일자"""
+  reportDate: String!
+
+  """공구 사용 집계"""
+  toolUseCount: [ToolChangeSumOutput!]!
+}
+
+type ToolCountLastOutput {
+  """공구 번호"""
+  code: String!
+
+  """공구 업데이트 여부"""
+  isUpdateTool: Boolean!
+
+  """공구 기준 수량"""
+  maxCount: Int!
+
+  """공구 순서"""
+  no: Int!
+
+  """공구 상태 분석 결과 (기준 정보)"""
+  toolStatusCount: String!
+
+  """공구 사용 수량"""
+  useCount: Int!
+
+  """공구 업데이트 시간"""
+  useStartTime: Float
+}
+
+type ToolHistory {
+  """생성 일시"""
+  createAt: DateTime!
+
+  """라인 코드"""
+  lineCode: String!
+
+  """설비 코드"""
+  machineCode: String!
+
+  """공정 코드"""
+  opCode: String!
+
+  """공구 번호"""
+  toolCode: String!
+
+  """공구 CT"""
+  toolCt: Float
+
+  """공구 LoadSum"""
+  toolLoadSum: Float
+
+  """공구 사용 수량"""
+  toolUseCount: Int!
+
+  """공구 사용 시작 일시"""
+  toolUseEndDate: DateTime!
+
+  """공구 사용 시작 일시"""
+  toolUseStartDate: DateTime!
+
+  """수정 일시"""
+  updateAt: DateTime
+
+  """공장 코드"""
+  workshopCode: String!
+}
+
+type ToolHistoryInfluxOutput {
+  """Cycle Time"""
+  CT: Float!
+
+  """데이터 수"""
+  Count: Float!
+
+  """라인 코드"""
+  LineCode: String
+
+  """부하 Sum"""
+  LoadSum: Float!
+
+  """평균 부하"""
+  Loss: Float!
+
+  """설비 코드"""
+  MachineCode: String
+
+  """공정 코드"""
+  OpCode: String
+
+  """공구 번호"""
+  TCode: String!
+
+  """공장 코드"""
+  WorkshopCode: String
+
+  """수집 일시"""
+  time: DateTime!
+}
+
+type ToolMutationOutput {
+  """생성 일시"""
+  createAt: DateTime
+
+  """에러 코드"""
+  errorCode: ErrorCode
+
+  """에러 내용"""
+  errorMsg: String
+
+  """성공 여부"""
+  isSuccess: Boolean
+
+  """설비 코드"""
+  machineCode: String
+
+  """한계 수명"""
+  maxCount: Int
+
+  """공구 번호"""
+  toolCode: String
+
+  """공구명"""
+  toolName: String
+
+  """공구 순서"""
+  toolOrder: Int
+
+  """수정 일시"""
+  updateAt: DateTime
+
+  """경고 임계치"""
+  warnRate: Float
+}
+
+input UpdateLineInput {
+  lineName: String!
+}
+
+input UpdateMachineInput {
+  """설비 IP"""
+  machineIp: String
+
+  """설비명"""
+  machineName: String
+
+  """설비 포트"""
+  machinePort: Int
+}
+
+input UpdateMultiThresholdInput {
+  """C/T 임계치 상한값"""
+  maxThresholdCt: Float
+
+  """LoadSum 임계치 상한값"""
+  maxThresholdLoad: Float
+
+  """C/T 임계치 하한값"""
+  minThresholdCt: Float
+
+  """LoadSum 임계치 하한값"""
+  minThresholdLoad: Float
+
+  """AI 예측 구간"""
+  predictPeriod: Float
+
+  """추가 설명"""
+  remark: String
+
+  """선택 결과"""
+  selected: String
+
+  """임계치 ID"""
+  thresholdId: String!
+
+  """오차율 임계치"""
+  thresholdLoss: Float
+
+  """Tool1 임계치"""
+  tool1Threshold: Float
+
+  """Tool2 임계치"""
+  tool2Threshold: Float
+
+  """Tool3 임계치"""
+  tool3Threshold: Float
+
+  """Tool4 임계치"""
+  tool4Threshold: Float
+}
+
+input UpdateOperationInput {
+  """공정명"""
+  opName: String!
+}
+
+input UpdateThresholdInput {
+  """C/T 임계치 상한값"""
+  maxThresholdCt: Float
+
+  """LoadSum 임계치 상한값"""
+  maxThresholdLoad: Float
+
+  """C/T 임계치 하한값"""
+  minThresholdCt: Float
+
+  """LoadSum 임계치 하한값"""
+  minThresholdLoad: Float
+
+  """AI 예측 구간"""
+  predictPeriod: Float
+
+  """추가 설명"""
+  remark: String
+
+  """선택 결과"""
+  selected: String
+
+  """오차율 임계치"""
+  thresholdLoss: Float
+
+  """Tool1 임계치"""
+  tool1Threshold: Float
+
+  """Tool2 임계치"""
+  tool2Threshold: Float
+
+  """Tool3 임계치"""
+  tool3Threshold: Float
+
+  """Tool4 임계치"""
+  tool4Threshold: Float
+}
+
+input UpdateToolInput {
+  """한계 수명"""
+  maxCount: Int
+
+  """공구명"""
+  toolName: String
+
+  """공구 순서"""
+  toolOrder: Int
+
+  """경고 임계치"""
+  warnRate: Float
+}
+
+input UpdateUserInput {
+  """비밀번호"""
+  password: String
+
+  """비밀번호 재설정 여부"""
+  resetFlag: String
+
+  """사용자 이름"""
+  userName: String
+
+  """사용자 권한"""
+  userRole: Int
+}
+
+input UpdateWorkshopInput {
+  """공장명"""
+  workshopName: String!
+}
+
+type User {
+  """생성 일시"""
+  createAt: DateTime!
+
+  """비밀번호"""
+  password: String!
+
+  """패스워드 재설정 여부"""
+  resetFlag: String!
+
+  """수정 일시"""
+  updateAt: DateTime
+
+  """사용자 ID"""
+  userId: String!
+
+  """사용자 이름"""
+  userName: String!
+
+  """사용자 권한"""
+  userRole: Int!
+}
+
+type UserMutationOutput {
+  """생성 일시"""
+  createAt: DateTime
+
+  """에러 코드"""
+  errorCode: ErrorCode
+
+  """에러 내용"""
+  errorMsg: String
+
+  """성공 여부"""
+  isSuccess: Boolean
+
+  """비밀번호"""
+  password: String
+
+  """패스워드 재설정 여부"""
+  resetFlag: String
+
+  """수정 일시"""
+  updateAt: DateTime
+
+  """사용자 ID"""
+  userId: String
+
+  """사용자 이름"""
+  userName: String
+
+  """사용자 권한"""
+  userRole: Int
+}
+
+type Workshop {
+  """생성 일시"""
+  createAt: DateTime!
+
+  """수정 일시"""
+  updateAt: DateTime
+
+  """공장 코드"""
+  workshopCode: String!
+
+  """공장명"""
+  workshopName: String!
+}
+
+type WorkshopListOutput {
+  """라인 배열"""
+  lineList: [LineListOutput!]
+
+  """공장 코드"""
+  workshopCode: String!
+
+  """공장명"""
+  workshopTitle: String!
+}
+
+type WorkshopMonitorOutput {
+  """라인 데이터 배열"""
+  lineMonitors: [LineMonitorOutput!]
+
+  """공장 코드"""
+  workshopCode: String!
+
+  """공장 명"""
+  workshopName: String!
+}
+
+type WorkshopMutationOutput {
+  """생성 일시"""
+  createAt: DateTime
+
+  """에러 코드"""
+  errorCode: ErrorCode
+
+  """에러 내용"""
+  errorMsg: String
+
+  """성공 여부"""
+  isSuccess: Boolean
+
+  """수정 일시"""
+  updateAt: DateTime
+
+  """공장 코드"""
+  workshopCode: String
+
+  """공장명"""
+  workshopName: String
+}

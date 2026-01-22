@@ -2,33 +2,34 @@
 
 ## 📋 개발 일정 (4일)
 
-### Day 1: 프로젝트 초기 설정 및 기본 구조
+### Day 1: 프로젝트 초기 설정 및 DB 연동
 
 - [ ] Python/FastAPI 프로젝트 초기화
-- [ ] 임베딩 모델 및 벡터 DB 설정
-- [ ] 기본 API 구조 생성
-- [ ] Gemini API 연동
+- [ ] MongoDB 커넥터 구현 (motor)
+- [ ] InfluxDB 커넥터 구현 (influxdb-client)
+- [ ] 임베딩 모델 및 Qdrant 설정
+- [ ] Gemini API 연동 및 설정
 
-### Day 2: 문서 처리 파이프라인
+### Day 2: 문서 처리 및 DB 쿼리 인터페이스
 
-- [ ] 문서 파싱 및 텍스트 추출
-- [ ] 청킹(Chunking) 전략 구현
-- [ ] 임베딩 생성 및 벡터 저장
-- [ ] 문서 메타데이터 관리
+- [ ] 멀티모달 문서 파싱 파이프라인 (PDF, 이미지, OCR)
+- [ ] 청킹 및 벡터 저장 (Qdrant)
+- [ ] MongoDB 알람/기기 조회 인터페이스 구현
+- [ ] InfluxDB 시계열 데이터 쿼리 인터페이스 구현
 
-### Day 3: RAG 쿼리 엔진
+### Day 3: 하이브리드 RAG 엔진 (Intent Routing)
 
-- [ ] 유사도 검색 구현
-- [ ] 컨텍스트 구성 및 프롬프트 엔지니어링
-- [ ] LLM 연동 및 응답 생성
-- [ ] 출처 추적 시스템
+- [ ] 질문 의도 분류기(Intent Classifier) 구현
+- [ ] 데이터 소스별 라우팅 로직 (Doc vs DB vs Sensor)
+- [ ] 병렬 데이터 수집 및 컨텍스트 통합
+- [ ] 통합 답변 생성 프롬프트 엔지니어링
 
-### Day 4: 최적화 및 고도화
+### Day 4: 최적화 및 최종 통합
 
-- [ ] 성능 최적화
-- [ ] 고급 RAG 기법 적용
-- [ ] 에러 핸들링 및 로깅
-- [ ] API 테스트 및 문서화
+- [ ] 성능 최적화 (캐싱, 병렬 처리)
+- [ ] 하이브리드 쿼리 에러 핸들링
+- [ ] API 최종 구현 및 테스트
+- [ ] 배포 준비 (Docker 컨테이너화)
 
 ## 🛠 기술 스택
 
@@ -47,6 +48,10 @@ google-generativeai==0.3.0    # Gemini API
 
 # 벡터 데이터베이스
 qdrant-client==1.7.0
+
+# 외부 데이터베이스 (Hybrid RAG)
+motor==3.3.2                  # MongoDB Async Driver
+influxdb-client==1.38.0       # InfluxDB Client
 
 # OCR 및 이미지 처리
 pytesseract==0.3.10
@@ -85,48 +90,48 @@ mypy==1.7.1
 
 ## 📁 폴더 구조
 
+> **현재 프로젝트 구조 반영** - 기능별 서브 디렉토리로 모듈화
+
 ```
 agent/
 ├── app/
-│   ├── api/                     # API 라우터
-│   │   ├── v1/
-│   │   │   ├── documents.py     # 문서 처리 API
-│   │   │   ├── query.py         # 쿼리 처리 API
-│   │   │   └── health.py        # 헬스체크 API
-│   │   └── __init__.py
-│   ├── core/                    # 핵심 비즈니스 로직
-│   │   ├── config.py            # 설정 관리
-│   │   ├── embedding_manager.py # 임베딩 모델 관리
-│   │   ├── vector_store.py      # 벡터 데이터베이스
-│   │   ├── document_processor.py # 멀티모달 문서 처리
-│   │   ├── ocr_engine.py        # OCR 처리 엔진
-│   │   ├── image_enhancer.py    # 이미지 품질 개선
-│   │   ├── rag_engine.py        # RAG 엔진
-│   │   └── gemini_service.py    # Gemini LLM 서비스
-│   ├── models/                  # 데이터 모델
+│   ├── api/v1/                  # API 라우터
+│   │   ├── documents.py         # 문서 업로드/관리
+│   │   ├── query.py             # 하이브리드 쿼리
+│   │   └── health.py            # 상태 체크
+│   ├── core/
+│   │   ├── llm/                 # LLM 관련 모듈
+│   │   │   ├── gemini_service.py      # Gemini API 연동
+│   │   │   ├── answer_generator.py    # 답변 생성 로직
+│   │   │   └── question_classifier.py # 질문 의도 분류
+│   │   ├── processing/          # 문서 처리
+│   │   │   ├── document_processor.py  # PDF/DOCX 파싱
+│   │   │   └── text_processor.py      # 청킹, 전처리
+│   │   ├── retrieval/           # 검색 관련
+│   │   │   ├── embedding_manager.py   # 임베딩 모델
+│   │   │   └── vector_store.py        # Qdrant 연동
+│   │   ├── session/             # 세션/대화 관리
+│   │   │   ├── conversation_manager.py
+│   │   │   └── websocket_manager.py
+│   │   ├── db/                  # ⭐ 외부 DB 연동 (하이브리드 RAG)
+│   │   │   ├── __init__.py
+│   │   │   ├── mongodb_connector.py   # 알람/기기/사용자 조회
+│   │   │   └── influxdb_connector.py  # 시계열 센서 데이터
+│   │   ├── config.py            # 환경 설정
+│   │   ├── rag_engine.py        # 문서 RAG 엔진
+│   │   └── hybrid_rag_engine.py # ⭐ 통합 하이브리드 RAG
+│   ├── services/
+│   │   ├── document_worker.py   # 백그라운드 처리
+│   │   └── processing_task.py   # 처리 태스크
+│   ├── models/
 │   │   ├── schemas.py           # Pydantic 스키마
-│   │   └── enums.py             # 열거형 정의
-│   ├── services/                # 서비스 계층
-│   │   ├── document_service.py  # 문서 관리 서비스
-│   │   ├── query_service.py     # 쿼리 처리 서비스
-│   │   └── cache_service.py     # 캐시 서비스
-│   ├── utils/                   # 유틸리티 함수
-│   │   ├── text_splitter.py     # 텍스트 분할
-│   │   ├── file_handlers.py     # 파일 처리
-│   │   ├── logger.py            # 로깅
-│   │   └── metrics.py           # 메트릭 수집
-│   └── main.py                  # FastAPI 앱 진입점
-├── tests/                       # 테스트 코드
-│   ├── unit/
-│   ├── integration/
-│   └── fixtures/
-├── scripts/                     # 유틸리티 스크립트
-├── docs/                        # 문서
-├── .env.example                 # 환경 변수 템플릿
-├── Dockerfile                   # Docker 설정
-├── docker-compose.yml           # Docker Compose
-├── requirements.txt             # Python 의존성
-└── README.md                    # 프로젝트 README
+│   │   └── enums.py             # 열거형
+│   └── main.py                  # FastAPI 진입점
+├── tests/
+├── Dockerfile
+├── docker-compose.yml
+├── requirements.txt
+└── README.md
 ```
 
 ## 🔧 핵심 컴포넌트 구현
@@ -482,143 +487,76 @@ class EmbeddingManager:
             return await self.embed_text(text)
 ```
 
-### 4. RAG 엔진
+### 4. 하이브리드 RAG 엔진 로직
+
+하이브리드 RAG 엔진은 질문의 의도를 분석하여 문서(Qdrant), 실시간 데이터(MongoDB), 시계열 데이터(InfluxDB)를 적절히 조합합니다.
+
+#### 하이브리드 쿼리 흐름 (Mermaid)
+
+```mermaid
+sequenceDiagram
+    participant User
+    participant Agent
+    participant Intent as Intent Classifier
+    participant DB as MongoDB/InfluxDB
+    participant Vector as Qdrant
+    participant LLM as Gemini
+
+    User->>Agent: "거실 온도가 너무 높은데 해결법은?"
+    Agent->>Intent: 질문 분석 (Source Routing)
+    Intent-->>Agent: {source: [sensor, manual], device: "aircon"}
+    
+    par DB Query
+        Agent->>DB: 현재 거실 온도 & 기기 상태 조회
+        DB-->>Agent: {temp: 32.5°C, status: error}
+    and Vector Search
+        Agent->>Vector: 에어컨 온도 관련 해결 매뉴얼 검색
+        Vector-->>Agent: [Manual Chunks]
+    end
+
+    Agent->>LLM: 질문 + 센서 데이터 + 매뉴얼 전송
+    LLM-->>Agent: 통합 답변 생성
+    Agent-->>User: "현재 온도는 32.5도입니다. 필터를 청소하세요..."
+```
+
+#### 하이브리드 엔진 구현 (Concept)
 
 ```python
-# app/core/rag_engine.py
-import logging
-from typing import List, Dict, Any, Optional
-from qdrant_client import QdrantClient
-from qdrant_client.models import Distance, VectorParams, PointStruct, Filter, FieldCondition, MatchValue
-import google.generativeai as genai
+# app/core/hybrid_rag_engine.py
 
-from app.core.embedding_manager import EmbeddingManager
-from app.models.schemas import QueryRequest, QueryResponse, SearchResult
+class HybridRAGEngine:
+    def __init__(self):
+        self.mongo = MongoDBConnector()
+        self.influx = InfluxDBConnector()
+        self.vector = VectorStore()
+        self.classifier = IntentClassifier()
 
-logger = logging.getLogger(__name__)
-
-class RAGEngine:
-    """RAG 시스템의 핵심 엔진 - 검색과 생성을 담당"""
-
-    def __init__(self, qdrant_host: str = "localhost", qdrant_port: int = 6333):
-        self.embedding_manager = EmbeddingManager()
-        self.vector_client = QdrantClient(host=qdrant_host, port=qdrant_port)
-
-        # Gemini API 설정
-        genai.configure(api_key="YOUR_GEMINI_API_KEY")
-        self.gemini_model = genai.GenerativeModel('gemini-pro')
-
-    async def query(self, request: QueryRequest) -> QueryResponse:
-        """사용자 질문에 대한 RAG 파이프라인 실행"""
-        try:
-            # 1. 질문을 벡터로 변환
-            question_embedding = await self.embedding_manager.embed_text(
-                request.question,
-                model_type='korean'
-            )
-
-            # 2. 벡터 DB에서 유사한 문서 검색
-            search_results = await self._vector_search(
-                question_embedding,
-                request.user_id,
-                limit=5,
-                score_threshold=0.7
-            )
-
-            # 3. 검색 결과가 없으면 일반 응답
-            if not search_results:
-                return QueryResponse(
-                    answer="죄송합니다. 관련된 문서를 찾을 수 없습니다.",
-                    sources=[],
-                    confidence=0.0
-                )
-
-            # 4. 컨텍스트 구성
-            context = self._build_context(search_results)
-
-            # 5. Gemini로 최종 답변 생성
-            answer = await self._generate_answer_with_gemini(request.question, context)
-
-            return QueryResponse(
-                answer=answer,
-                sources=[SearchResult(
-                    document_id=result.id,
-                    content=result.payload["content"][:200] + "...",
-                    score=result.score,
-                    metadata=result.payload.get("metadata", {})
-                ) for result in search_results],
-                confidence=max([r.score for r in search_results])
-            )
-
-        except Exception as e:
-            logger.error(f"RAG 쿼리 처리 실패: {e}")
-            return QueryResponse(
-                answer="처리 중 오류가 발생했습니다.",
-                sources=[],
-                confidence=0.0
-            )
-
-    async def _vector_search(
-        self,
-        query_embedding: List[float],
-        user_id: str,
-        limit: int = 5,
-        score_threshold: float = 0.7
-    ) -> List[Any]:
-        """벡터 유사도 검색"""
-        try:
-            search_result = self.vector_client.search(
-                collection_name=f"documents_{user_id}",
-                query_vector=query_embedding,
-                limit=limit,
-                score_threshold=score_threshold
-            )
-            return search_result
-
-        except Exception as e:
-            logger.error(f"벡터 검색 실패: {e}")
-            return []
-
-    def _build_context(self, search_results: List[Any]) -> str:
-        """검색 결과를 바탕으로 컨텍스트 구성"""
-        context_parts = []
-        for i, result in enumerate(search_results, 1):
-            content = result.payload["content"]
-            metadata = result.payload.get("metadata", {})
-
-            context_part = f"[문서 {i}]"
-            if metadata.get("page"):
-                context_part += f" (페이지 {metadata['page']})"
-            if metadata.get("type"):
-                context_part += f" ({metadata['type']})"
-            context_part += f"\n{content}\n"
-
-            context_parts.append(context_part)
-
-        return "\n".join(context_parts)
-
-    async def _generate_answer_with_gemini(self, question: str, context: str) -> str:
-        """Gemini를 사용해 컨텍스트 기반 답변 생성"""
-        try:
-            prompt = f"""
-다음 컨텍스트를 참고해서 질문에 정확하고 유용한 답변을 해주세요.
-컨텍스트에 없는 내용은 추측하지 말고, 모르겠다고 답변해주세요.
-
-컨텍스트:
-{context}
-
-질문: {question}
-
-답변:
-"""
-
-            response = self.gemini_model.generate_content(prompt)
-            return response.text
-
-        except Exception as e:
-            logger.error(f"Gemini 답변 생성 실패: {e}")
-            return "답변 생성 중 오류가 발생했습니다."
+    async def execute_query(self, question: str, user_id: str):
+        # 1. 의도 분류 (Intent Classification)
+        intent = await self.classifier.analyze(question)
+        
+        tasks = []
+        # 2. 소스별 데이터 병렬 수집
+        if intent.needs_db:
+            tasks.append(self.mongo.get_device_data(intent.target))
+        if intent.needs_sensor:
+            tasks.append(self.influx.get_series_data(intent.target))
+        if intent.needs_docs:
+            tasks.append(self.vector.search(question))
+            
+        results = await asyncio.gather(*tasks)
+        
+        # 3. 통합 컨텍스트 생성 및 답변
+        context = self._combine_results(results)
+        return await self.gemini.generate(question, context)
 ```
+
+### 5. 데이터베이스 커넥터 (DB Connectors)
+
+에이전트는 백엔드를 거치지 않고 직접 데이터베이스에서 컨텍스트를 추출합니다.
+
+- **MongoDB Connector**: 질문에 언급된 특정 `device_id`나 `alarm_id`의 상세 속성을 가져와 LLM이 구체적인 상황을 인지하게 합니다.
+- **InfluxDB Connector**: "온도가 갑자기 올랐어?" 같은 질문에 대해 최근 1시간의 집계 데이터(mean, max)를 추출하여 트렌드 정보를 제공합니다.
 
 ### 5. OCR 엔진 (저화질 도면 처리용)
 
@@ -1488,15 +1426,9 @@ settings = Settings()
 
 ### 개발 완료 기준
 
-- [ ] FastAPI 애플리케이션 기본 구조 완성
-- [ ] 문서 처리 파이프라인 구현 완료
-- [ ] 벡터 데이터베이스 연동 완료
-- [ ] RAG 쿼리 엔진 구현 완료
-- [ ] API 엔드포인트 모두 구현
-- [ ] 에러 핸들링 및 로깅 시스템 구축
-- [ ] 성능 모니터링 시스템 구축
-- [ ] 캐싱 시스템 구현
-- [ ] 단위 테스트 및 통합 테스트 작성
-- [ ] Docker 컨테이너화 완료
-- [ ] 환경 설정 및 배포 준비 완료
-- [ ] API 문서화 완료
+- [ ] MongoDB 및 InfluxDB 커넥터 구현 완료
+- [ ] 질문 의도 분류기(Intent Classifier) 구현 완료
+- [ ] 하이브리드 RAG 엔진 통합 완료
+- [ ] 문서 처리 파이프라인 (OCR 포함) 구현 완료
+- [ ] 단위 테스트 및 하이브리드 통합 테스트 작성 완료
+- [ ] Docker 컨테이너화 및 환경 설정 완료

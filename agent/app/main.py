@@ -3,35 +3,63 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi import WebSocket, WebSocketDisconnect
 from contextlib import asynccontextmanager
 import logging
+import sys
 
-from app.core.config import settings
-from app.core.rag_engine import rag_engine
-from app.core.websocket_manager import progress_websocket
+# 로그 컬러 포맷터 정의
+class ColouredFormatter(logging.Formatter):
+    grey = "\x1b[38;20m"
+    green = "\x1b[32;20m"
+    yellow = "\x1b[33;20m"
+    red = "\x1b[31;20m"
+    bold_red = "\x1b[31;1m"
+    reset = "\x1b[0m"
+    # 포맷 분리: [시간] [레벨] (색상) + 파일:라인 - 메시지 (기본색)
+    prefix_fmt = "%(asctime)s [%(levelname)s]"
+    suffix_fmt = " %(filename)s:%(lineno)d - %(message)s"
+
+    FORMATS = {
+        logging.DEBUG: grey + prefix_fmt + reset + suffix_fmt,
+        logging.INFO: green + prefix_fmt + reset + suffix_fmt,
+        logging.WARNING: yellow + prefix_fmt + reset + suffix_fmt,
+        logging.ERROR: red + prefix_fmt + reset + suffix_fmt,
+        logging.CRITICAL: bold_red + prefix_fmt + reset + suffix_fmt
+    }
+
+    def format(self, record):
+        log_fmt = self.FORMATS.get(record.levelno)
+        # 시간 포맷은 밀리초 포함하여 이전과 유사하게
+        formatter = logging.Formatter(log_fmt, datefmt="%Y-%m-%d %H:%M:%S")
+        return formatter.format(record)
+
+
+from app.core import settings, hybrid_rag_engine, progress_websocket
 from app.api.v1 import health, query, documents
 
 # 로깅 설정
-logging.basicConfig(
-    level=getattr(logging, settings.LOG_LEVEL),
-    format=settings.LOG_FORMAT
-)
+# 로깅 설정 (커스텀 컬러 포맷 적용)
+root_logger = logging.getLogger()
+root_logger.setLevel(getattr(logging, settings.LOG_LEVEL))
+
+# 기존 핸들러 제거 후 커스텀 핸들러 추가
+if root_logger.handlers:
+    for handler in root_logger.handlers[:]:
+        root_logger.removeHandler(handler)
+
+console_handler = logging.StreamHandler(sys.stdout)
+console_handler.setFormatter(ColouredFormatter())
+root_logger.addHandler(console_handler)
 logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """앱 생명주기 관리"""
-    # 시작 시
-    logger.info(f"{settings.APP_NAME} 시작...")
-    
     try:
-        # RAG 엔진 초기화
-        await rag_engine.initialize()
-        logger.info("RAG 엔진 초기화 완료")
+        # 하이브리드 RAG 엔진 초기화 (내부에서 상세 리포트 출력)
+        await hybrid_rag_engine.initialize()
         
         # 앱 상태에 저장
-        app.state.rag_engine = rag_engine
-        
-        logger.info(f"{settings.APP_NAME} 준비 완료!")
+        app.state.hybrid_rag_engine = hybrid_rag_engine
         
     except Exception as e:
         logger.error(f"앱 초기화 실패: {e}")
@@ -43,7 +71,7 @@ async def lifespan(app: FastAPI):
     logger.info(f"{settings.APP_NAME} 종료 중...")
     
     try:
-        await rag_engine.cleanup()
+        await hybrid_rag_engine.cleanup()
         logger.info("리소스 정리 완료")
     except Exception as e:
         logger.error(f"리소스 정리 실패: {e}")

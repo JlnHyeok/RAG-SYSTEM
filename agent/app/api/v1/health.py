@@ -1,9 +1,6 @@
 from fastapi import APIRouter
 from app.models.schemas import HealthResponse
-from app.core.rag_engine import rag_engine
-from app.core.embedding_manager import embedding_manager
-from app.core.vector_store import vector_store
-from app.core.gemini_service import gemini_service
+from app.core import hybrid_rag_engine, embedding_manager, vector_store, gemini_service
 
 
 router = APIRouter()
@@ -14,15 +11,15 @@ async def health_check():
     """서비스 헬스 체크"""
     
     try:
-        # RAG 엔진 상태 확인
-        rag_status = await rag_engine.health_check()
+        # 하이브리드 RAG 엔진 상태 확인
+        status = await hybrid_rag_engine.health_check()
         
         return HealthResponse(
-            status="healthy" if rag_status.get("rag_engine") == "healthy" else "unhealthy",
+            status="healthy" if status.get("status") == "healthy" else "unhealthy",
             service="RAG Agent Service",
             version="1.0.0",
-            models_loaded=rag_status.get("components", {}),
-            error=rag_status.get("error")  # 에러 정보도 포함
+            models_loaded=status,
+            error=status.get("error")
         )
     except Exception as e:
         return HealthResponse(

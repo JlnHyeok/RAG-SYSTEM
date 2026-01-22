@@ -5,8 +5,8 @@
 ### Day 1: 프로젝트 초기 설정 및 기본 구조
 
 - [ ] NestJS 프로젝트 초기화
-- [ ] PostgreSQL 데이터베이스 설정
-- [ ] TypeORM 설정 및 엔티티 정의
+- [ ] MongoDB 데이터베이스 설정
+- [ ] Mongoose 스키마 정의
 - [ ] 기본 모듈 구조 생성
 
 ### Day 2: 인증 시스템 구현
@@ -47,15 +47,14 @@
     "@nestjs/common": "^10.0.0",
     "@nestjs/core": "^10.0.0",
     "@nestjs/platform-express": "^10.0.0",
-    "@nestjs/typeorm": "^10.0.0",
+    "@nestjs/mongoose": "^10.0.0",
     "@nestjs/config": "^3.0.0",
     "@nestjs/jwt": "^10.1.0",
     "@nestjs/passport": "^10.0.0",
     "@nestjs/websockets": "^10.0.0",
     "@nestjs/platform-socket.io": "^10.0.0",
     "@nestjs/swagger": "^7.1.0",
-    "typeorm": "^0.3.17",
-    "pg": "^8.11.0",
+    "mongoose": "^8.0.0",
     "bcryptjs": "^2.4.3",
     "passport": "^0.6.0",
     "passport-jwt": "^4.0.1",
@@ -79,6 +78,7 @@
     "@types/passport-local": "^1.0.35",
     "@types/bcryptjs": "^2.4.2",
     "@types/multer": "^1.4.7",
+    "@types/mongoose": "^5.11.97",
     "jest": "^29.5.0",
     "source-map-support": "^0.5.21",
     "supertest": "^6.3.3",
@@ -148,198 +148,163 @@ src/
 
 ## 🗄 데이터베이스 설계
 
-### 엔티티 정의
+### 스키마 정의
 
-#### User Entity
+#### User Schema
 
 ```typescript
-// src/auth/entities/user.entity.ts
-import {
-  Entity,
-  PrimaryGeneratedColumn,
-  Column,
-  CreateDateColumn,
-  UpdateDateColumn,
-  OneToMany,
-} from "typeorm";
-import { Exclude } from "class-transformer";
-import { Document } from "../../documents/entities/document.entity";
-import { Conversation } from "../../conversations/entities/conversation.entity";
+// src/auth/schemas/user.schema.ts
+import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
+import { Document, Types } from 'mongoose';
+import { Exclude } from 'class-transformer';
 
-@Entity("users")
-export class User {
-  @PrimaryGeneratedColumn("uuid")
-  id: string;
-
-  @Column({ unique: true })
+@Schema({ timestamps: true, collection: 'users' })
+export class User extends Document {
+  @Prop({ required: true, unique: true })
   email: string;
 
-  @Column()
+  @Prop({ required: true })
   @Exclude()
   passwordHash: string;
 
-  @Column()
+  @Prop({ required: true })
   name: string;
 
-  @Column({ default: "user" })
+  @Prop({ default: 'user' })
   role: string;
 
-  @OneToMany(() => Document, (document) => document.user)
-  documents: Document[];
+  @Prop({ type: [String], default: [] })
+  devices: string[];  // 소유 기기 목록
 
-  @OneToMany(() => Conversation, (conversation) => conversation.user)
-  conversations: Conversation[];
-
-  @CreateDateColumn()
-  createdAt: Date;
-
-  @UpdateDateColumn()
-  updatedAt: Date;
+  // Mongoose는 자동으로 createdAt, updatedAt 추가 (timestamps: true)
 }
+
+export const UserSchema = SchemaFactory.createForClass(User);
+
+// 인덱스 추가
+UserSchema.index({ email: 1 });
 ```
 
-#### Document Entity
+#### Document Schema
 
 ```typescript
-// src/documents/entities/document.entity.ts
-import {
-  Entity,
-  PrimaryGeneratedColumn,
-  Column,
-  ManyToOne,
-  CreateDateColumn,
-  UpdateDateColumn,
-  JoinColumn,
-} from "typeorm";
-import { User } from "../../auth/entities/user.entity";
+// src/documents/schemas/document.schema.ts
+import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
+import { Document as MongooseDocument, Types } from 'mongoose';
 
-@Entity("documents")
-export class Document {
-  @PrimaryGeneratedColumn("uuid")
-  id: string;
+@Schema({ timestamps: true, collection: 'documents' })
+export class Document extends MongooseDocument {
+  @Prop({ type: Types.ObjectId, ref: 'User', required: true })
+  userId: Types.ObjectId;
 
-  @Column()
-  userId: string;
-
-  @ManyToOne(() => User, (user) => user.documents, { onDelete: "CASCADE" })
-  @JoinColumn({ name: "userId" })
-  user: User;
-
-  @Column({ length: 500 })
+  @Prop({ required: true, maxlength: 500 })
   title: string;
 
-  @Column({ length: 1000 })
+  @Prop({ required: true, maxlength: 1000 })
   filePath: string;
 
-  @Column({ length: 50 })
+  @Prop({ required: true, maxlength: 50 })
   fileType: string;
 
-  @Column({ type: "bigint" })
+  @Prop({ required: true, type: Number })
   fileSize: number;
 
-  @Column({ default: 0 })
+  @Prop({ default: 0 })
   chunkCount: number;
 
-  @Column({ default: "processing" })
+  @Prop({ default: 'processing' })
   status: string;
 
-  @Column({ type: "jsonb", nullable: true })
-  metadata: any;
-
-  @CreateDateColumn()
-  createdAt: Date;
-
-  @UpdateDateColumn()
-  updatedAt: Date;
+  @Prop({ type: Object })
+  metadata?: Record<string, any>;
 }
+
+export const DocumentSchema = SchemaFactory.createForClass(Document);
+
+// 인덱스
+DocumentSchema.index({ userId: 1, createdAt: -1 });
+DocumentSchema.index({ status: 1 });
 ```
 
-#### Conversation Entity
+#### Conversation Schema
 
 ```typescript
-// src/conversations/entities/conversation.entity.ts
-import {
-  Entity,
-  PrimaryGeneratedColumn,
-  Column,
-  ManyToOne,
-  OneToMany,
-  CreateDateColumn,
-  UpdateDateColumn,
-  JoinColumn,
-} from "typeorm";
-import { User } from "../../auth/entities/user.entity";
-import { Message } from "../../messages/entities/message.entity";
+// src/conversations/schemas/conversation.schema.ts
+import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
+import { Document, Types } from 'mongoose';
+import { Message } from '../../messages/schemas/message.schema';
 
-@Entity("conversations")
-export class Conversation {
-  @PrimaryGeneratedColumn("uuid")
-  id: string;
+@Schema({ timestamps: true, collection: 'conversations' })
+export class Conversation extends Document {
+  @Prop({ type: Types.ObjectId, ref: 'User', required: true })
+  userId: Types.ObjectId;
 
-  @Column()
-  userId: string;
+  @Prop({ maxlength: 500 })
+  title?: string;
 
-  @ManyToOne(() => User, (user) => user.conversations, { onDelete: "CASCADE" })
-  @JoinColumn({ name: "userId" })
-  user: User;
-
-  @Column({ length: 500, nullable: true })
-  title: string;
-
-  @OneToMany(() => Message, (message) => message.conversation)
-  messages: Message[];
-
-  @CreateDateColumn()
-  createdAt: Date;
-
-  @UpdateDateColumn()
-  updatedAt: Date;
-}
-```
-
-#### Message Entity
-
-```typescript
-// src/messages/entities/message.entity.ts
-import {
-  Entity,
-  PrimaryGeneratedColumn,
-  Column,
-  ManyToOne,
-  CreateDateColumn,
-  JoinColumn,
-} from "typeorm";
-import { Conversation } from "../../conversations/entities/conversation.entity";
-
-@Entity("messages")
-export class Message {
-  @PrimaryGeneratedColumn("uuid")
-  id: string;
-
-  @Column()
-  conversationId: string;
-
-  @ManyToOne(() => Conversation, (conversation) => conversation.messages, {
-    onDelete: "CASCADE",
+  // Embedded messages (MongoDB 방식)
+  @Prop({
+    type: [{
+      role: { type: String, required: true },
+      content: { type: String, required: true },
+      sources: { type: Object },
+      timestamp: { type: Date, default: Date.now }
+    }],
+    default: []
   })
-  @JoinColumn({ name: "conversationId" })
-  conversation: Conversation;
+  messages: Array<{
+    role: string;
+    content: string;
+    sources?: any;
+    timestamp: Date;
+  }>;
+}
 
-  @Column({ length: 20 })
+export const ConversationSchema = SchemaFactory.createForClass(Conversation);
+
+// 인덱스
+ConversationSchema.index({ userId: 1, updatedAt: -1 });
+```
+
+#### Message Schema (참고용 - Conversation에 임베디드)
+
+> **Note**: MongoDB 특성상 메시지는 Conversation 스키마에 임베디드 문서로 저장됩니다.
+> 별도 컬렉션이 필요한 경우에만 아래 스키마를 사용하세요.
+
+```typescript
+// src/messages/schemas/message.schema.ts (선택적)
+import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
+import { Document, Types } from 'mongoose';
+
+@Schema({ timestamps: true, collection: 'messages' })
+export class Message extends Document {
+  @Prop({ type: Types.ObjectId, ref: 'Conversation', required: true })
+  conversationId: Types.ObjectId;
+
+  @Prop({ required: true, maxlength: 20 })
   role: string; // 'user' or 'assistant'
 
-  @Column({ type: "text" })
+  @Prop({ required: true })
   content: string;
 
-  @Column({ type: "jsonb", nullable: true })
-  sources: any;
-
-  @CreateDateColumn()
-  createdAt: Date;
+  @Prop({ type: Object })
+  sources?: any;
 }
+
+export const MessageSchema = SchemaFactory.createForClass(Message);
+
+// 인덱스
+MessageSchema.index({ conversationId: 1, createdAt: -1 });
 ```
 
 ## 🔐 인증 시스템
+
+> **Note**: 아래 코드 예시는 TypeORM 패턴입니다. MongoDB/Mongoose로 변환 시:
+> - `@InjectRepository(User)` → `@InjectModel(User.name)`
+> - `Repository<User>` → `Model<User>`
+> - `userRepository.findOne({ where: { email } })` → `userModel.findOne({ email })`
+> - `userRepository.create()` → `new userModel()`
+> - `user.id` → `user._id`
 
 ### JWT 전략 구현
 

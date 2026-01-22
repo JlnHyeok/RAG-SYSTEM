@@ -51,6 +51,40 @@ class Settings(BaseSettings):
     REDIS_DB: int = 0
     REDIS_PASSWORD: Optional[str] = None
     
+    # MongoDB 설정 (민감 정보는 .env에서 설정)
+    MONGODB_URL: str = ""  # .env에서 설정 필요 (mongodb://host:port)
+    MONGODB_DB_NAME: str = ""  # .env에서 설정 필요
+    MONGODB_USER: str = ""  # .env에서 설정 필요
+    MONGODB_PASSWORD: str = ""  # .env에서 설정 필요
+    
+    # InfluxDB 설정 (민감 정보는 .env에서 설정)
+    INFLUXDB_URL: str = ""  # .env에서 설정 필요
+    INFLUXDB_TOKEN: str = ""  # .env에서 설정 필요 (필수)
+    INFLUXDB_ORG: str = ""  # .env에서 설정 필요
+    INFLUXDB_BUCKET: str = ""  # .env에서 설정 필요
+    
+    # MongoDB 컬렉션 설정
+    MONGODB_COLLECTION_PRODUCTS: str = "products"
+    MONGODB_COLLECTION_ABNORMALS: str = "abnormals"
+    MONGODB_COLLECTION_MACHINES: str = "machineMaster"
+    MONGODB_COLLECTION_TOOLS: str = "toolMaster"
+    MONGODB_COLLECTION_THRESHOLDS: str = "thresholdMaster"
+    MONGODB_COLLECTION_LINES: str = "lineMaster"
+    MONGODB_COLLECTION_OPERATIONS: str = "operationMaster"
+    MONGODB_COLLECTION_WORKSHOPS: str = "workshopMaster"
+    MONGODB_COLLECTION_TOOL_CHANGE: str = "tool_change"
+    MONGODB_COLLECTION_TOOL_HISTORY: str = "tool_history"
+    
+    # InfluxDB Measurement 설정
+    INFLUXDB_MEASUREMENT_RAW: str = "raw"
+    INFLUXDB_MEASUREMENT_PRODUCT: str = "product"
+    INFLUXDB_MEASUREMENT_TOOL_HISTORY: str = "tool_history"
+    
+    # 기본 필터 설정 (개발/테스트용 - 빈 값이면 모든 데이터 조회)
+    DEFAULT_WORKSHOP_ID: str = "F01"
+    DEFAULT_LINE_ID: str = "OR-T3"
+    DEFAULT_OP_CODE: str = "OP10-1"
+    
     # 로깅 설정
     LOG_LEVEL: str = "INFO"
     LOG_FORMAT: str = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"

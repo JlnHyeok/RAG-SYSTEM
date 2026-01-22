@@ -18,9 +18,8 @@ from app.services.document_worker import (
     processing_queue,
     ensure_processing_worker_running
 )
-from app.core.vector_store import vector_store
+from app.core import vector_store, settings
 from app.models.schemas import DocumentUploadResponse, DocumentDeleteResponse
-from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -159,7 +158,7 @@ async def list_documents(user_id: str = "anonymous") -> Dict[str, Any]:
         try:
             await vector_store.ensure_collection(collection_name)
             
-            from app.core.embedding_manager import embedding_manager
+            from app.core import embedding_manager
             await embedding_manager.initialize()
             
             test_embedding = await embedding_manager.embed_text("test")
@@ -370,10 +369,9 @@ async def get_vector_status() -> Dict[str, Any]:
 async def test_vector_search(query: str = "테스트") -> Dict[str, Any]:
     """벡터 검색 테스트"""
     try:
-        from app.core.embedding_manager import embedding_manager
-        from app.core.rag_engine import rag_engine
+        from app.core import embedding_manager, hybrid_rag_engine
         
-        await rag_engine.initialize()
+        await hybrid_rag_engine.initialize()
         
         query_embedding = await embedding_manager.embed_text(query)
         
@@ -413,7 +411,7 @@ async def test_vector_search(query: str = "테스트") -> Dict[str, Any]:
 async def websocket_progress(websocket: WebSocket, document_id: str):
     """문서 처리 진행률을 실시간으로 스트리밍"""
     try:
-        from app.core.websocket_manager import progress_websocket
+        from app.core import progress_websocket
         
         await progress_websocket.connect(websocket, document_id)
         logger.info(f"WebSocket 연결됨: {document_id}")
@@ -432,7 +430,7 @@ async def websocket_progress(websocket: WebSocket, document_id: str):
     except Exception as e:
         logger.error(f"WebSocket 오류: {e}")
         try:
-            from app.core.websocket_manager import progress_websocket
+            from app.core import progress_websocket
             await progress_websocket.disconnect(websocket, document_id)
         except:
             pass
@@ -531,7 +529,7 @@ async def _delete_document_by_filename(collection_name: str, filename: str) -> i
         
         # Fallback: 전체 검색
         if total_deleted == 0:
-            from app.core.embedding_manager import embedding_manager
+            from app.core import embedding_manager
             await embedding_manager.initialize()
             
             test_embedding = await embedding_manager.embed_text("test")

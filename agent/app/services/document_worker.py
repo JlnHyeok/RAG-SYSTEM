@@ -114,14 +114,14 @@ async def process_and_store_document(
     progress: ProcessingProgress
 ) -> Dict[str, Any]:
     """메모리의 파일 내용을 직접 처리하고 Qdrant 벡터 DB에 저장"""
-    from app.core.rag_engine import rag_engine
+    from app.core import hybrid_rag_engine
     from app.models.schemas import DocumentChunk
     
     try:
-        if not rag_engine._initialized:
-            print("\n🔄 RAG 엔진 초기화 시작...", flush=True)
-            await rag_engine.initialize()
-            print("✅ RAG 엔진 초기화 완료!", flush=True)
+        if not hybrid_rag_engine._initialized:
+            print("\n🔄 하이브리드 RAG 엔진 초기화 시작...", flush=True)
+            await hybrid_rag_engine.initialize()
+            print("✅ 하이브리드 RAG 엔진 초기화 완료!", flush=True)
         
         text_chunks = 0
         image_chunks = 0
@@ -130,14 +130,14 @@ async def process_and_store_document(
         if file_extension in ['.txt', '.md']:
             chunks = await _process_text_file(
                 file_content, document_id, original_filename, 
-                progress, rag_engine.embedding_manager
+                progress, hybrid_rag_engine.retriever.embedding_manager
             )
             text_chunks = len(chunks)
             
         elif file_extension == '.pdf':
             chunks, image_count = await _process_pdf_file(
                 file_content, document_id, original_filename,
-                progress, rag_engine.embedding_manager
+                progress, hybrid_rag_engine.retriever.embedding_manager
             )
             text_chunks = len([c for c in chunks if c.metadata.get('content_type') == 'text'])
             image_chunks = len([c for c in chunks if c.metadata.get('content_type') == 'image'])
@@ -146,7 +146,7 @@ async def process_and_store_document(
             # 기타 파일은 텍스트로 처리 시도
             chunks = await _process_text_file(
                 file_content, document_id, original_filename,
-                progress, rag_engine.embedding_manager
+                progress, hybrid_rag_engine.retriever.embedding_manager
             )
             text_chunks = len(chunks)
         
@@ -155,7 +155,7 @@ async def process_and_store_document(
             await progress.start_step_async(5)
             await progress.update_step_progress_async(50.0)
             
-            await rag_engine.vector_store.add_documents(chunks, user_id)
+            await hybrid_rag_engine.retriever.vector_store.add_documents(chunks, user_id)
             
             await progress.complete_step_async()
             print(f"\n💾 Qdrant에 {len(chunks):,}개 청크 저장 완료", flush=True)
@@ -375,7 +375,7 @@ async def _process_pdf_file(
 
 async def _wait_for_websocket_connection(document_id: str, timeout: int = 10):
     """WebSocket 연결을 기다림"""
-    from app.core.websocket_manager import progress_websocket
+    from app.core import progress_websocket
     
     start_time = time.time()
     while time.time() - start_time < timeout:
@@ -392,7 +392,7 @@ async def _wait_for_websocket_connection(document_id: str, timeout: int = 10):
 
 async def _ensure_completion_message_sent(document_id: str, result_data: dict, filename: str):
     """완료 메시지가 확실히 전송되도록 보장"""
-    from app.core.websocket_manager import progress_websocket
+    from app.core import progress_websocket
     
     max_retries = 5
     retry_count = 0

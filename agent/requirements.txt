@@ -12,6 +12,10 @@ google-generativeai==0.3.0    # Gemini API
 # 벡터 데이터베이스
 qdrant-client==1.7.0
 
+# 외부 데이터베이스 (하이브리드 RAG)
+motor==3.3.2                  # MongoDB Async Driver
+influxdb-client==1.38.0       # InfluxDB Client
+
 # OCR 및 이미지 처리
 pytesseract==0.3.10
 Pillow==10.0.1                # 이미지 처리 및 품질 향상
