@@ -98,6 +98,7 @@ class MongoDBConnector:
         self.col_lines = settings.MONGODB_COLLECTION_LINES
         self.col_operations = settings.MONGODB_COLLECTION_OPERATIONS
         self.col_workshops = settings.MONGODB_COLLECTION_WORKSHOPS
+        self.col_users = settings.MONGODB_COLLECTION_USERS
     
     async def initialize(self, db_name: Optional[str] = None):
         """MongoDB 연결 초기화"""
@@ -463,6 +464,39 @@ class MongoDBConnector:
             return self._serialize_doc(threshold) if threshold else None
         except Exception as e:
             logger.error(f"임계치 조회 실패: {e}")
+            return None
+    
+    # ============ 사용자 데이터 조회 ============
+    
+    async def get_all_users(self) -> List[Dict[str, Any]]:
+        """전체 사용자 목록 조회 (password 필드 제외)"""
+        if not self._initialized:
+            await self.initialize()
+        
+        try:
+            cursor = self.db[self.col_users].find(
+                {},
+                {"password": 0}  # password 필드 제외
+            )
+            users = await cursor.to_list(length=100)
+            return [self._serialize_doc(u) for u in users]
+        except Exception as e:
+            logger.error(f"사용자 목록 조회 실패: {e}")
+            return []
+    
+    async def get_user_by_id(self, user_id: str) -> Optional[Dict[str, Any]]:
+        """특정 사용자 조회 (password 필드 제외)"""
+        if not self._initialized:
+            await self.initialize()
+        
+        try:
+            user = await self.db[self.col_users].find_one(
+                {"userId": user_id},
+                {"password": 0}  # password 필드 제외
+            )
+            return self._serialize_doc(user) if user else None
+        except Exception as e:
+            logger.error(f"사용자 조회 실패: {e}")
             return None
     
     # ============ 마스터 데이터 조회 ============

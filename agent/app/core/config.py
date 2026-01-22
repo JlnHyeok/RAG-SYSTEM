@@ -74,11 +74,12 @@ class Settings(BaseSettings):
     MONGODB_COLLECTION_WORKSHOPS: str = "workshopMaster"
     MONGODB_COLLECTION_TOOL_CHANGE: str = "tool_change"
     MONGODB_COLLECTION_TOOL_HISTORY: str = "tool_history"
+    MONGODB_COLLECTION_USERS: str = "userMaster"
     
     # InfluxDB Measurement 설정
-    INFLUXDB_MEASUREMENT_RAW: str = "raw"
-    INFLUXDB_MEASUREMENT_PRODUCT: str = "product"
-    INFLUXDB_MEASUREMENT_TOOL_HISTORY: str = "tool_history"
+    INFLUXDB_MEASUREMENT_RAW: str = "cnc_analyze"
+    INFLUXDB_MEASUREMENT_PRODUCT: str = "cnc_product"
+    INFLUXDB_MEASUREMENT_TOOL_HISTORY: str = "cnc_tool"
     
     # 기본 필터 설정 (개발/테스트용 - 빈 값이면 모든 데이터 조회)
     DEFAULT_WORKSHOP_ID: str = "F01"

@@ -86,10 +86,12 @@ class QuestionClassifier:
    - ABNORMAL_QUERY: 알람, 에러, 불량, 이상 내역.
    - RAW_SENSOR_QUERY: 설비의 센서 데이터, 가동 상태, 부하, 가동 시간, CT(Cycle Time).
    - TOOL_QUERY: 공구 정보, 공구 사용량, 공구 수명, 공구 교체, 툴 라이프.
+   - MACHINE_QUERY: 설비 정보, 설비 목록, **임계치**, 설정값, 설비 스펙.
    - **중요 규칙**: 
      1. "가동 시간", "CT", "부하" 등 센서/상태 관련 질문 -> **RAW_SENSOR_QUERY**.
      2. "생산량", "몇 개 만들었어" -> **PRODUCTION_QUERY**.
      3. "공구 사용량", "툴 수명", "공구 교체" -> **TOOL_QUERY**.
+     4. "임계치", "threshold", "설정값", "설비 정보" -> **MACHINE_QUERY**.
 
 2. **엔티티 (Entities)**:
    - machine_id: 설비 코드/번호 (예: 10-1, CNC_01). "설비", "장비" 등의 단어 제외하고 코드만 추출.

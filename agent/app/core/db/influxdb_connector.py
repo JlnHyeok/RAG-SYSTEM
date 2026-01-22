@@ -435,21 +435,23 @@ class InfluxDBConnector:
     
     async def get_tool_stats(self, filter: FilterCommon, hours: int = 24) -> List[Dict[str, Any]]:
         """공구 사용 통계 조회 (tool_history measurement)"""
-        if not filter.did:
-            return []
-
+        # filter.did 체크 제거 (machine_id 없으면 전체/Regex 조회)
+        
         # Count 필드 조회 (TCode별로 그룹화하여 합계 계산)
+        # _build_did_filter 사용하여 유연한 필터링
         query = f'''
         from(bucket: "{self.bucket}")
           |> range(start: -{hours}h)
           |> filter(fn: (r) => r["_measurement"] == "{settings.INFLUXDB_MEASUREMENT_TOOL_HISTORY}")
-          |> filter(fn: (r) => r["did"] == "{filter.did}")
+          |> filter(fn: (r) => {self._build_did_filter(filter)})
           |> filter(fn: (r) => r["_field"] == "Count")
           |> group(columns: ["TCode"])
           |> sum()
         '''
         
         try:
+            # 디버깅을 위한 쿼리 로그
+            logger.info(f"Flux Query Execution (Tool Stats):\n{query.strip()}")
             loop = asyncio.get_running_loop()
             result = await loop.run_in_executor(None, lambda: self.query_api.query(query=query, org=self.org))
             
@@ -475,23 +477,25 @@ class InfluxDBConnector:
 
     async def get_machine_runtime(self, filter: FilterCommon, hours: int = 24) -> Dict[str, Any]:
         """설비 가동 시간 조회 (Run=3 상태 집계)"""
-        # did 태그가 없는 경우 필터링 불가
-        if not filter.did:
-            return {"runtime_seconds": 0, "operating_rate": 0.0}
-
+    async def get_machine_runtime(self, filter: FilterCommon, hours: int = 24) -> Dict[str, Any]:
+        """설비 가동 시간 조회 (Run=3 상태 집계)"""
+        # did 태그가 없어도 실행 (전체/Regex 조회)
+        
         # Run 상태가 3(가동중)인 데이터 포인트 개수 * 수집주기(초) 
         # 정확한 계산을 위해 상태 지속 시간을 계산해야 하지만, 여기서는 근사치로 계산
         query = f'''
         from(bucket: "{self.bucket}")
           |> range(start: -{hours}h)
           |> filter(fn: (r) => r["_measurement"] == "{settings.INFLUXDB_MEASUREMENT_RAW}")
-          |> filter(fn: (r) => r["did"] == "{filter.did}")
+          |> filter(fn: (r) => {self._build_did_filter(filter)})
           |> filter(fn: (r) => r["_field"] == "Run")
           |> filter(fn: (r) => r["_value"] == 3)
           |> count() 
         '''
         
         try:
+            # 디버깅을 위한 쿼리 로그
+            logger.info(f"Flux Query Execution (Machine Runtime):\n{query.strip()}")
             loop = asyncio.get_running_loop()
             result = await loop.run_in_executor(None, lambda: self.query_api.query(query=query, org=self.org))
             

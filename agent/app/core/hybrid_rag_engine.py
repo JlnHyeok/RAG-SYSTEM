@@ -335,7 +335,10 @@ class HybridRAGEngine:
                 
             elif source == DataSourceType.TOOL:
                 if on_status: await on_status("공구 정보 조회 중...")
-                tasks.append(self._get_tool_data(intent.entities))
+                # time_range 전달을 위해 entities 복사 및 추가
+                tool_entities = intent.entities.copy()
+                tool_entities["time_range"] = intent.time_range
+                tasks.append(self._get_tool_data(tool_entities))
                 source_keys.append("tool")
                 
             elif source == DataSourceType.RAW_SENSOR:
@@ -530,7 +533,7 @@ class HybridRAGEngine:
                 if machines:
                     logger.info(f"설비 코드 목록: {[m.get('machineCode') for m in machines]}")
                 
-                # 각 설비별 공구 정보 및 사용량 조회
+                # 각 설비별 공구 정보, 사용량, 임계치 조회
                 machines_with_tools = []
                 for machine in machines[:20]:  # 최대 20개 설비
                     machine_code = machine.get("machineCode")
@@ -539,7 +542,15 @@ class HybridRAGEngine:
                         tools = await self.mongodb.get_tools_by_machine(machine_code)
                         machine["tools"] = tools
                         
-                        # 2. 공구 사용량 조회 (FilterCommon 생성 필요)
+                        # 2. 임계치 조회
+                        try:
+                            threshold = await self.mongodb.get_threshold_by_machine(machine_code)
+                            if threshold:
+                                machine["threshold"] = threshold
+                        except Exception as e:
+                            logger.error(f"설비 {machine_code} 임계치 조회 실패: {e}")
+                        
+                        # 3. 공구 사용량 조회 (FilterCommon 생성 필요)
                         try:
                             workshop_code = machine.get("workshopCode") or settings.DEFAULT_WORKSHOP_ID
                             line_code = machine.get("lineCode") or settings.DEFAULT_LINE_ID
@@ -587,12 +598,40 @@ class HybridRAGEngine:
                 except Exception as e:
                     logger.error(f" [ToolDebug] InfluxDB Tool Stats 조회 실패: {e}")
 
-                # MongoDB 공구 사용량 조회 (추가된 로직)
+                # MongoDB 공구 사용량 조회 (개선된 로직)
                 try:
-                    tool_counts = await self.mongodb.get_current_tool_counts(filter_common)
-                    logger.info(f" [ToolDebug] MongoDB Tool Counts 조회 결과: {len(tool_counts)}건")
-                    if tool_counts:
-                         logger.info(f" [ToolDebug] 상세: {[t.get('toolCode') for t in tool_counts]}")
+                    target_machines = []
+                    if filter_common.machine_id:
+                        target_machines.append(filter_common.machine_id)
+                    else:
+                        # 설비 미지정 시 전체 설비 조회
+                        machines = await self.mongodb.get_machines_by_filter(
+                            workshop_code=filter_common.workshop_id,
+                            line_code=filter_common.line_id,
+                            op_code=filter_common.op_code
+                        )
+                        target_machines = [m.get("machineCode") for m in machines if m.get("machineCode")]
+                        logger.info(f" [ToolDebug] 설비 미지정 -> 대상 설비 {len(target_machines)}대 조회")
+
+                    for m_code in target_machines:
+                        # 필터 복제 및 machine_id 설정
+                        specific_filter = FilterCommon(
+                            workshop_id=filter_common.workshop_id,
+                            line_id=filter_common.line_id,
+                            op_code=filter_common.op_code,
+                            machine_id=m_code
+                        )
+                        
+                        counts = await self.mongodb.get_current_tool_counts(specific_filter)
+                        
+                        # 설비 정보 추가
+                        for c in counts:
+                            c['machineCode'] = m_code
+                            
+                        tool_counts.extend(counts)
+                        
+                    logger.info(f" [ToolDebug] 최종 수집된 Tool Counts: {len(tool_counts)}건")
+                    
                 except Exception as e:
                     logger.error(f" [ToolDebug] MongoDB Tool Counts 조회 실패: {e}")
             else:
@@ -609,6 +648,8 @@ class HybridRAGEngine:
         except Exception as e:
             logger.error(f"공구 데이터 조회 실패: {e}")
             return {}
+    
+
     
     async def _get_sensor_data(
         self, 
@@ -629,7 +670,7 @@ class HybridRAGEngine:
             target_fields = [t.strip() for t in raw_target.split(",")]
             
             measurement_map = {
-                "CT": "cnc_product",
+                "CT": settings.INFLUXDB_MEASUREMENT_PRODUCT,
                 # 필요시 추가 매핑
             }
             
@@ -782,7 +823,7 @@ class HybridRAGEngine:
         if not data:
             return "데이터 없음"
         
-        lines = []
+        lines = ["### [MongoDB] 생산 이력 및 집계 정보"]
         if "stats" in data:
             stats = data["stats"]
             lines.append(f"* 조회 기간 내 생산 수: {stats.get('count', 0)}건")
@@ -805,7 +846,7 @@ class HybridRAGEngine:
         if not data:
             return "데이터 없음"
         
-        lines = []
+        lines = ["### [MongoDB] 이상감지 발생 현황 정보"]
         if "summary" in data:
             summary = data["summary"]
             lines.append(f"* 총 이상감지 건수: {summary.get('total', 0)}건")
@@ -828,6 +869,7 @@ class HybridRAGEngine:
         if "machine" in data:
             m = data["machine"]
             lines = [
+                "### [MongoDB] 설비 마스터 및 설정 정보",
                 f"* 설비 코드: {m.get('machineCode', 'N/A')}",
                 f"* 설비명: {m.get('machineName', 'N/A')}",
                 f"* 공정: {m.get('opCode', 'N/A')}",
@@ -837,9 +879,17 @@ class HybridRAGEngine:
             # 임계치 정보 (상세)
             if "threshold" in data and data["threshold"]:
                 t = data["threshold"]
-                lines.append("\n[임계치 설정]")
+                lines.append("\n### [MongoDB] 임계치 설정 상세")
                 lines.append(f"* CT 임계치: {t.get('minThresholdCt', 0):,.0f} ~ {t.get('maxThresholdCt', 0):,.0f}")
                 lines.append(f"* LoadSum 임계치: {t.get('minThresholdLoad', 0):,.0f} ~ {t.get('maxThresholdLoad', 0):,.0f}")
+                
+                # 오차율 임계치
+                if t.get("thresholdLoss"):
+                    lines.append(f"* 오차율 임계치: {t.get('thresholdLoss')}")
+                
+                # AI 예측 구간
+                if t.get("predictPeriod"):
+                    lines.append(f"* AI 예측 구간: {t.get('predictPeriod')}")
                 
                 # 공구별 임계치
                 tool_thresholds = []
@@ -850,7 +900,7 @@ class HybridRAGEngine:
                 if tool_thresholds:
                     lines.append(f"* 공구별 임계치: {', '.join(tool_thresholds)}")
                 
-                # 비고
+                # 비고 및 선택 상태
                 if t.get("remark"):
                     lines.append(f"* 비고: {t.get('remark')}")
                 if t.get("selected"):
@@ -877,13 +927,13 @@ class HybridRAGEngine:
                 # 가동률에 따라 상태 아이콘 표시
                 status_icon = "🟢" if r.get('operating_rate', 0) > 80 else "🟡" if r.get('operating_rate', 0) > 50 else "🔴"
                 
-                lines.append(f"\n[최근 {hours}시간 가동 현황]")
+                lines.append(f"\n### [InfluxDB] 최근 {hours}시간 가동 이력 현황")
                 lines.append(f"* 가동 시간: {r.get('runtime_hours', 0)}시간 ({r.get('runtime_minutes', 0)}분)")
                 lines.append(f"* 가동률: {status_icon} {r.get('operating_rate', 0)}%")
             
             # 공구 사용량 (계산된 값)
             if "tool_counts" in data and data["tool_counts"]:
-                lines.append(f"\n[공구 사용량 현황]")
+                lines.append(f"\n### [MongoDB] 실시간 공구 사용량 현황")
                 for tc in data["tool_counts"]:
                     # 상태에 따른 아이콘
                     status = tc.get('status', 'OK')
@@ -894,21 +944,46 @@ class HybridRAGEngine:
             return "\n".join(lines)
         
         if "machines" in data:
-            lines = [f"총 {data.get('total_count', 0)}대 설비:"]
+            lines = ["### [MongoDB] 설비 목록 및 설정 정보", f"총 {data.get('total_count', 0)}대 설비:"]
             for m in data["machines"]:
-                machine_info = f"  - {m.get('machineCode', 'N/A')}: {m.get('machineName', 'N/A')}"
+                lines.append(f"\n**설비 {m.get('machineCode', 'N/A')}** ({m.get('machineName', 'N/A')})")
+                
+                # 임계치 정보 상세 표시
+                if "threshold" in m and m["threshold"]:
+                    t = m["threshold"]
+                    lines.append("  [임계치 설정]")
+                    lines.append(f"  * CT 임계치: {t.get('minThresholdCt', 0):,.0f} ~ {t.get('maxThresholdCt', 0):,.0f}")
+                    lines.append(f"  * LoadSum 임계치: {t.get('minThresholdLoad', 0):,.0f} ~ {t.get('maxThresholdLoad', 0):,.0f}")
+                    
+                    if t.get("thresholdLoss"):
+                        lines.append(f"  * 오차율 임계치: {t.get('thresholdLoss')}")
+                    if t.get("predictPeriod"):
+                        lines.append(f"  * AI 예측 구간: {t.get('predictPeriod')}")
+                    
+                    # 공구별 임계치
+                    tool_thresholds = []
+                    for i in range(1, 5):
+                        key = f"tool{i}Threshold"
+                        if key in t and t[key]:
+                            tool_thresholds.append(f"T{i}: {t[key]}")
+                    if tool_thresholds:
+                        lines.append(f"  * 공구별 임계치: {', '.join(tool_thresholds)}")
+                    
+                    if t.get("remark"):
+                        lines.append(f"  * 비고: {t.get('remark')}")
+                else:
+                    lines.append("  [임계치] 설정 없음")
                 
                 # 해당 설비의 공구 정보도 표시
                 tools = m.get("tools", [])
                 if tools:
-                    tool_names = [t.get('toolCode', 'N/A') for t in tools[:5]]  # 최대 5개만
-                    machine_info += f" | 공구: {', '.join(tool_names)}"
+                    tool_names = [t.get('toolCode', 'N/A') for t in tools[:5]]
+                    tool_line = f"  [공구] {', '.join(tool_names)}"
                     if len(tools) > 5:
-                        machine_info += f" 외 {len(tools)-5}개"
-                else:
-                    machine_info += " | 공구: 없음"
+                        tool_line += f" 외 {len(tools)-5}개"
+                    lines.append(tool_line)
                 
-                # 공구 사용량 요약 표시 (추가)
+                # 공구 사용량 요약 표시
                 if "tool_counts" in m and m["tool_counts"]:
                     status_counts = {"OK": 0, "WARN": 0, "ERROR": 0}
                     for tc in m["tool_counts"]:
@@ -922,9 +997,8 @@ class HybridRAGEngine:
                     if status_counts["OK"] > 0: icons.append(f"🟢{status_counts['OK']}")
                     
                     if icons:
-                        machine_info += f" | 상태: {' '.join(icons)}"
+                        lines.append(f"  [상태] {' '.join(icons)}")
                 
-                lines.append(machine_info)
             return "\n".join(lines)
         
         return "데이터 없음"
@@ -936,13 +1010,37 @@ class HybridRAGEngine:
         
         lines = []
         
-        # 사용 통계
+        # 1. InfluxDB 데이터 (이력 통계)
         if "usage_stats" in data and data["usage_stats"]:
             stats = data["usage_stats"]
             period = stats[0].get('period_hours', 24) if stats else 24
-            lines.append(f"[최근 {period}시간 공구 사용 통계]")
+            lines.append(f"### [InfluxDB] 최근 {period}시간 공구 사용 이력 통계")
+            lines.append("(과거 조업 이력에서 집계된 공구별 누적 사용 횟수)")
             for s in stats:
                  lines.append(f"* 공구 {s.get('tool_code')}: {s.get('total_use_count')}회 사용")
+            lines.append("")
+            
+        # 2. MongoDB 데이터 (실시간 현황)
+        if "tool_counts" in data and data["tool_counts"]:
+            tc_list = data["tool_counts"]
+            lines.append(f"### [MongoDB] 공구 실시간 사용량 및 수명 정보")
+            lines.append("(현재 설비에 장착된 공구의 실시간 사용량(useCount) 및 마스터 수명(maxCount) 정보)")
+            
+            # 설비별 그룹화
+            by_machine = {}
+            for item in tc_list:
+                m_code = item.get("machineCode", "Unknown")
+                if m_code not in by_machine: by_machine[m_code] = []
+                by_machine[m_code].append(item)
+            
+            for m_code, sorted_tools in by_machine.items():
+                if m_code != "Unknown":
+                     lines.append(f"\n> 설비: {m_code}")
+                
+                for tc in sorted_tools:
+                    status = tc.get('status', 'OK')
+                    icon = "🟢" if status == "OK" else "🟡" if status == "WARN" else "🔴"
+                    lines.append(f"* {tc.get('toolCode')}: {tc.get('useCount', 0)}/{tc.get('maxCount', 0)}회 ({tc.get('usageRate', 0)}%) {icon}")
             lines.append("")
         
         if "tool" in data:
@@ -968,7 +1066,7 @@ class HybridRAGEngine:
         if not data:
             return "데이터 없음"
         
-        lines = []
+        lines = ["### [InfluxDB] 센서 데이터 시계열 분석"]
         
         # [NEW] 다중 필드 통계 처리 (stats_{Field})
         stats_keys = sorted([k for k in data.keys() if k.startswith("stats_")])
@@ -1037,6 +1135,7 @@ class HybridRAGEngine:
 
         if "current_status" in data:
             status = data["current_status"]
+            lines.append(f"\n### [InfluxDB] 실시간 센서 상태 요약")
             lines.append(f"* 가동 상태: {status.get('run_status', 'N/A')}")
             lines.append(f"* 현재 부하: {status.get('current_load', 'N/A')}")
             lines.append(f"* 이송 속도: {status.get('current_feed', 'N/A')}")
