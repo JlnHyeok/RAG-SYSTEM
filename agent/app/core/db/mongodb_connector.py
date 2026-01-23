@@ -4,11 +4,18 @@ MongoDB 커넥터
 에이전트가 하이브리드 RAG에서 실시간 컨텍스트를 가져올 때 사용합니다.
 
 Backend MongoDB 컬렉션:
-- products: 생산 이력 (productNo, ct, loadSum, productResult)
-- abnormals: 이상감지 이력 (abnormalCode, abnormalValue, abnormalTool)
-- machines: 설비 마스터 (machineCode, machineName, opCode)
-- tools: 공구 마스터 (toolCode, toolName, maxCount)
-- thresholds: 임계치 설정 (maxThresholdCt, maxThresholdLoad)
+- products: 생산 이력 (productNo, ct, loadSum, productResult, count 등)
+- abnormals: 이상감지 상세 이력
+- abnormalSummary: 이상감지 요약 및 판정 (abnormalCt, abnormalLoad, abnormalAi)
+- machineMaster: 설비 마스터 (machineCode, machineName, machineIp 등)
+- toolMaster: 공구 마스터 (toolCode, maxCount, warnRate 등)
+- thresholdMaster: 임계치 설정 (min/maxThresholdCt, min/maxThresholdLoad 등)
+- tool_history: 공구 사용 이력 (toolUseCount, toolCt, toolLoadSum 등)
+
+참고: MongoDB에는 snake_case 메타데이터(@Prop name)가 있지만, 
+실제 데이터는 TypeScript Entity 속성명인 **camelCase**로 저장되어 있습니다.
+(예: `product_begin_date` -> `startTime`, `machine_code` -> `machineCode`)
+
 """
 
 import logging
@@ -92,13 +99,16 @@ class MongoDBConnector:
         # 컬렉션명 설정
         self.col_products = settings.MONGODB_COLLECTION_PRODUCTS
         self.col_abnormals = settings.MONGODB_COLLECTION_ABNORMALS
+        self.col_abnormal_summary = settings.MONGODB_COLLECTION_ABNORMAL_SUMMARY
         self.col_machines = settings.MONGODB_COLLECTION_MACHINES
         self.col_tools = settings.MONGODB_COLLECTION_TOOLS
         self.col_thresholds = settings.MONGODB_COLLECTION_THRESHOLDS
         self.col_lines = settings.MONGODB_COLLECTION_LINES
         self.col_operations = settings.MONGODB_COLLECTION_OPERATIONS
         self.col_workshops = settings.MONGODB_COLLECTION_WORKSHOPS
+        self.col_tool_history = settings.MONGODB_COLLECTION_TOOL_HISTORY
         self.col_users = settings.MONGODB_COLLECTION_USERS
+
     
     async def initialize(self, db_name: Optional[str] = None):
         """MongoDB 연결 초기화"""
@@ -367,6 +377,47 @@ class MongoDBConnector:
         except Exception as e:
             logger.error(f"이상감지 요약 조회 실패: {e}")
             return {"error": str(e)}
+    
+    async def get_abnormal_summary_records(
+        self,
+        filter_common: FilterCommon,
+        product_no: Optional[str] = None,
+        hours: int = 24
+    ) -> List[Dict[str, Any]]:
+        """
+        abnormalSummary 컬렉션 조회 (생산품별 CT/LOAD/AI 통합 판정)
+        
+        Args:
+            filter_common: 공통 필터 (공장, 라인, 공정, 설비)
+            product_no: 특정 생산 번호 (None이면 최근 N시간 전체)
+            hours: 조회 기간 (시간)
+        
+        Returns:
+            abnormalSummary 레코드 리스트
+            각 레코드는 CT/LOAD/AI 세 가지 이상 유형의 통합 정보 포함
+        """
+        if not self._initialized:
+            await self.initialize()
+        
+        query = filter_common.to_mongo_filter()
+        
+        if product_no:
+            query["productNo"] = product_no
+        else:
+            cutoff_time = datetime.utcnow() - timedelta(hours=hours)
+            query["abnormalBeginDate"] = {"$gte": cutoff_time}
+        
+        logger.info(f"🔍 [MongoDB Query] abnormalSummary 조회 쿼리: {query}")
+        
+        try:
+            cursor = self.db[self.col_abnormal_summary].find(query).sort("abnormalBeginDate", -1).limit(100)
+            summaries = await cursor.to_list(length=100)
+            logger.info(f"✅ [MongoDB Result] abnormalSummary 조회: {len(summaries)}건")
+            return self._serialize_docs(summaries)
+        except Exception as e:
+            logger.error(f"abnormalSummary 조회 실패: {e}")
+            return []
+
     
     # ============ 설비 마스터 조회 ============
     
@@ -677,12 +728,82 @@ class MongoDBConnector:
             
             return results
         except Exception as e:
-            logger.error(f"공구 사용량 목록 조회 실패: {e}")
+            logger.error(f"공구 현황 조회 실패: {e}")
+            return []
+
+    async def get_tool_history(
+        self,
+        filter_common: FilterCommon,
+        tool_code: Optional[str] = None,
+        hours: int = 168
+    ) -> List[Dict[str, Any]]:
+        """공구 사용 이력 조회"""
+        if not self._initialized:
+            await self.initialize()
+        
+        query = filter_common.to_mongo_filter()
+        if tool_code:
+            query["toolCode"] = tool_code
+        
+        cutoff_time = datetime.utcnow() - timedelta(hours=hours)
+        query["toolUseStartDate"] = {"$gte": cutoff_time}
+        
+        try:
+            cursor = self.db[self.col_tool_history].find(query).sort("toolUseStartDate", -1).limit(100)
+            history = await cursor.to_list(length=100)
+            logger.info(f"✅ 공구 이력 조회: {len(history)}건")
+            return self._serialize_docs(history)
+        except Exception as e:
+            logger.error(f"공구 이력 조회 실패: {e}")
             return []
     
-    # ============ 유틸리티 ============
+    async def get_tool_usage_stats(
+        self,
+        filter_common: FilterCommon,
+        tool_code: str,
+        hours: int = 168
+    ) -> Dict[str, Any]:
+        """공구 사용 통계"""
+        if not self._initialized:
+            await self.initialize()
+        
+        query = {
+            **filter_common.to_mongo_filter(),
+            "toolCode": tool_code,
+            "toolUseStartDate": {"$gte": datetime.utcnow() - timedelta(hours=hours)}
+        }
+        
+        try:
+            pipeline = [
+                {"$match": query},
+                {"$group": {
+                    "_id": "$toolCode",
+                    "totalUseCount": {"$sum": "$toolUseCount"},
+                    "avgCt": {"$avg": "$toolCt"},
+                    "avgLoadSum": {"$avg": "$toolLoadSum"},
+                    "recordCount": {"$sum": 1}
+                }}
+            ]
+            
+            cursor = self.db[self.col_tool_history].aggregate(pipeline)
+            results = await cursor.to_list(length=1)
+            
+            if results:
+                return {
+                    "toolCode": tool_code,
+                    "totalUseCount": results[0].get("totalUseCount", 0),
+                    "avgCt": results[0].get("avgCt", 0),
+                    "avgLoadSum": results[0].get("avgLoadSum", 0),
+                    "recordCount": results[0].get("recordCount", 0)
+                }
+            return {}
+        except Exception as e:
+            logger.error(f"공구 통계 조회 실패: {e}")
+            return {}
     
-    def _serialize_doc(self, doc: Dict) -> Dict:
+    # ============ Helper Methods ============
+    
+    def _serialize_doc(self, doc: Any) -> Dict:
         """MongoDB 문서 직렬화 (ObjectId 처리)"""
         if doc is None:
             return None

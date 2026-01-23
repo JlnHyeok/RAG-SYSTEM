@@ -155,6 +155,16 @@ class AnswerGenerator:
             tone = "✅ **전문적/실용적 톤**: 실무에 바로 적용 가능하게 전달"
             data_source_label = "DB 조회 결과 (공구 마스터 데이터)"
             
+        elif question_type == "USER_QUERY":
+            persona = "당신은 시스템 사용자 관리 전문가입니다. 사용자 정보를 명확하게 정리하여 안내하세요."
+            instructions = """
+            1. **사용자 정보 정리**: MongoDB의 사용자 마스터 데이터를 기반으로 사용자 ID, 이름, 권한을 명확히 정리하세요.
+            2. **권한 수준 설명**: 각 사용자의 권한 레벨(일반, 관리자, 슈퍼 관리자)을 이해하기 쉽게 설명하세요.
+            3. **계정 상태 확인**: 비밀번호 재설정이 필요한 계정이 있으면 언급하세요.
+            """
+            tone = "✅ **전문적/명확한 톤**: 정확한 정보를 간결하게 전달"
+            data_source_label = "DB 조회 결과 (사용자 마스터 데이터)"
+            
         elif question_type == "HYBRID_QUERY":
             persona = "당신은 제조 현장의 통합 분석 전문가입니다. 여러 데이터 소스(문서, DB)를 종합하여 분석하세요."
             instructions = """
@@ -193,6 +203,7 @@ class AnswerGenerator:
                     ✅ **근거 명시**: 답변의 근거가 되는 데이터나 문서를 구분하여 언급하세요. (예: "MongoDB에 등록된 마스터 정보에 따르면...", "InfluxDB의 이력 데이터를 분석한 결과...")
                     ✅ **중복 방지**: 같은 내용을 반복하지 말고, 한 번에 완전한 답변을 제공하세요.
                     ✅ **표 포맷팅**: 데이터 비교가 필요한 경우 Markdown 표를 활용하세요.
+                    ⚠️ **CLI 환경 주의**: 표(table) 내에서는 절대 HTML 태그(<br>, <b> 등)를 사용하지 마세요. 줄바꿈이 필요한 경우 쉼표(,)나 슬래시(/)로 구분하거나 별도 행으로 분리하세요.
 
                     답변 형식:
                     **요약 답변:**
@@ -203,6 +214,10 @@ class AnswerGenerator:
 
                     **참고/조치사항:** (필요한 경우)
                     [추가 정보나 권장 조치]
+                    
+                    🔒 **보안 규칙 (최우선):**
+                    ❌ **절대 비밀번호를 언급하지 마세요**: 사용자 정보를 답변할 때 비밀번호(password), 해시값, 또는 암호화된 값은 절대 포함하지 마세요.
+                    ❌ 제공된 컨텍스트에 password 필드가 있더라도 무시하고 다른 정보만 답변하세요.
                     
                     ⚠️ 중요: 답변을 절대 중간에 끊지 마세요. 모든 분석과 설명을 완전히 작성해야 합니다."""
     
@@ -242,7 +257,7 @@ class AnswerGenerator:
                     simple_prompt,
                     generation_config=config
                 )
-                return response.text
+                return self.gemini_service._extract_text_from_response(response)
             
             result = await asyncio.to_thread(generate)
             return text_processor.remove_duplicate_content(result)
@@ -300,7 +315,7 @@ class AnswerGenerator:
             if hasattr(self.gemini_service, 'model') and self.gemini_service.model:
                 def generate():
                     response = self.gemini_service.model.generate_content(fallback_prompt)
-                    return response.text
+                return self.gemini_service._extract_text_from_response(response)
                 
                 result = await asyncio.to_thread(generate)
                 if len(result.strip()) > 30:

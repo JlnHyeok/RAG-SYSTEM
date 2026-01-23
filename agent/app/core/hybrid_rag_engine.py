@@ -14,11 +14,12 @@
 
 import logging
 import asyncio
-from typing import List, Dict, Any, Optional, Tuple
+from typing import List, Dict, Any, Optional, Tuple, Union
 from dataclasses import dataclass, field
 from enum import Enum
 import time
 import re
+from datetime import datetime, timedelta
 
 # DB 및 검색 모듈
 from app.core.db.mongodb_connector import get_mongodb_connector, MongoDBConnector, FilterCommon
@@ -47,6 +48,7 @@ class DataSourceType(str, Enum):
     MACHINE = "machine"             # MongoDB 설비 정보
     TOOL = "tool"                   # MongoDB 공구 정보
     RAW_SENSOR = "raw_sensor"       # InfluxDB 실시간 센서
+    USER = "user"                   # MongoDB 사용자 정보
     HYBRID = "hybrid"               # 다중 소스 통합
 
 
@@ -58,6 +60,7 @@ QUESTION_TO_SOURCE_MAP = {
     QuestionType.MACHINE_QUERY: DataSourceType.MACHINE,
     QuestionType.TOOL_QUERY: DataSourceType.TOOL,
     QuestionType.RAW_SENSOR_QUERY: DataSourceType.RAW_SENSOR,
+    QuestionType.USER_QUERY: DataSourceType.USER,
     QuestionType.HYBRID_QUERY: DataSourceType.HYBRID,
 }
 
@@ -84,6 +87,7 @@ class HybridContext:
     machine_data: Optional[Dict] = None
     tool_data: Optional[List[Dict]] = None
     sensor_data: Optional[Dict] = None
+    user_data: Optional[Dict] = None
     metadata: Dict[str, Any] = field(default_factory=dict)
 
 
@@ -208,7 +212,8 @@ class HybridRAGEngine:
                 "abnormal": bool(context.abnormal_data),
                 "machine": bool(context.machine_data),
                 "tool": bool(context.tool_data),
-                "sensor": bool(context.sensor_data)
+                "sensor": bool(context.sensor_data),
+                "user": bool(context.user_data)
             }
             logger.info(f"수집된 컨텍스트: {has_data}")
             
@@ -346,6 +351,11 @@ class HybridRAGEngine:
                 hours = self._time_range_to_hours(intent.time_range)
                 tasks.append(self._get_sensor_data(filter_common, hours, intent.sensor_query_type, intent.target_field))
                 source_keys.append("sensor")
+            
+            elif source == DataSourceType.USER:
+                if on_status: await on_status("사용자 정보 조회 중...")
+                tasks.append(self._get_user_data(intent.entities))
+                source_keys.append("user")
 
         if not tasks: 
             return context
@@ -369,6 +379,8 @@ class HybridRAGEngine:
                 context.tool_data = res
             elif key == "sensor": 
                 context.sensor_data = res
+            elif key == "user":
+                context.user_data = res
             
         return context
     
@@ -440,7 +452,7 @@ class HybridRAGEngine:
             stats = await self.mongodb.get_product_stats(filter_common, hours)
             
             return {
-                "recent_products": products[:10],  # 최근 10건
+                "recent_products": products[:30],  # 최근 30건
                 "stats": stats,
                 "total_count": len(products)
             }
@@ -452,28 +464,60 @@ class HybridRAGEngine:
         self, 
         filter_common: Optional[FilterCommon], 
         hours: int,
-        abnormal_code: Optional[str] = None
-    ) -> List[Dict]:
-        """이상감지 이력 조회"""
+        abnormal_code: Optional[str] = None,
+        product_no: Optional[str] = None
+    ) -> Dict:
+        """
+        이상감지 데이터 조회 - abnormals와 abnormalSummary 병렬 조회
+        
+        Args:
+            filter_common: 공통 필터
+            hours: 조회 기간 (시간)
+            abnormal_code: 특정 이상 코드 (CT, LOAD, AI)
+            product_no: 특정 생산 번호
+        
+        Returns:
+            {
+                "summary_records": abnormalSummary 레코드 (CT/LOAD/AI 통합 판정),
+                "recent_abnormals": abnormals 상세 이력,
+                "stats": 집계 통계 (유형별 건수)
+            }
+        """
         if not filter_common:
-            return []
+            return {}
         
         try:
-            if abnormal_code:
-                abnormals = await self.mongodb.get_abnormals_by_code(filter_common, abnormal_code, hours)
-            else:
-                abnormals = await self.mongodb.get_recent_abnormals(filter_common, hours)
+            # 두 컬렉션을 병렬로 조회
+            summary_records_task = self.mongodb.get_abnormal_summary_records(
+                filter_common, 
+                product_no=product_no,
+                hours=hours
+            )
             
-            summary = await self.mongodb.get_abnormal_summary(filter_common, hours)
+            if abnormal_code:
+                details_task = self.mongodb.get_abnormals_by_code(filter_common, abnormal_code, hours)
+            else:
+                details_task = self.mongodb.get_recent_abnormals(filter_common, hours)
+            
+            stats_task = self.mongodb.get_abnormal_summary(filter_common, hours)
+            
+            # 병렬 실행으로 성능 최적화
+            summary_records, abnormals, stats = await asyncio.gather(
+                summary_records_task,
+                details_task,
+                stats_task
+            )
             
             return {
-                "recent_abnormals": abnormals[:10],
-                "summary": summary,
+                "summary_records": summary_records,  # abnormalSummary 컬렉션 (생산품별 CT/LOAD/AI 판정)
+                "recent_abnormals": abnormals[:30],  # abnormals 컬렉션 (상세 이벤트)
+                "stats": stats,                       # 집계 통계
                 "total_count": len(abnormals)
             }
         except Exception as e:
             logger.error(f"이상감지 데이터 조회 실패: {e}")
-            return []
+            return {}
+
     
     async def _get_machine_data(self, entities: Dict) -> Dict:
         """설비 정보 조회"""
@@ -576,77 +620,75 @@ class HybridRAGEngine:
             return {}
     
     async def _get_tool_data(self, entities: Dict) -> Dict:
-        """공구 정보 조회 (InfluxDB 사용 통계 포함)"""
-        machine_id = entities.get("machine_id")
+        """공구 정보 조회 (InfluxDB 통계 + MongoDB 이력/현황)"""
         tool_code = entities.get("tool_code")
+        filter_common = self._create_filter_common(entities)
+        hours = self._time_range_to_hours(entities.get("time_range"))
+        
+        if not filter_common:
+            return {}
+
+        tasks = []
+        task_keys = []
+        
+        # 1. InfluxDB 사용 통계 (기존 로직)
+        tasks.append(self.influxdb.get_tool_stats(filter_common, hours=hours))
+        task_keys.append("usage_stats")
+        
+        # 2. MongoDB 공구 현재 수명 현황 (기존 로직)
+        # 설비 ID가 있을 때만 조회 가능
+        if filter_common.machine_id:
+            tasks.append(self.mongodb.get_current_tool_counts(filter_common))
+            task_keys.append("tool_counts")
+        
+        # 3. [NEW] MongoDB 공구 상세 이력 (tool_code가 있을 때)
+        if tool_code:
+            tasks.append(self.mongodb.get_tool_history(filter_common, tool_code, hours=hours))
+            task_keys.append("history")
+            
+            tasks.append(self.mongodb.get_tool_usage_stats(filter_common, tool_code, hours=hours))
+            task_keys.append("history_stats")
+            
+        try:
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+            
+            data = {}
+            for key, res in zip(task_keys, results):
+                if isinstance(res, Exception):
+                    logger.error(f" [ToolDebug] {key} 조회 실패: {res}")
+                    data[key] = [] if key in ["usage_stats", "tool_counts", "history"] else {}
+                else:
+                    data[key] = res
+                    
+            return data
+            
+        except Exception as e:
+            logger.error(f"공구 데이터 통합 조회 실패: {e}")
+            return {}
+
+
+
+    async def _get_user_data(self, entities: Dict) -> Dict:
+        """사용자 정보 조회 (비밀번호 제외)"""
+        user_id = entities.get("user_id")
         
         try:
-            # InfluxDB 사용 통계 조회
-            usage_stats = []
-            filter_common = self._create_filter_common(entities)
-            
-            tool_counts = []
-            
-            if filter_common:
-                logger.info(f" [ToolDebug] 공구 데이터 조회 시작 - Filter: {filter_common.to_mongo_filter()}")
-                
-                # InfluxDB 조회
-                try:
-                    hour_range = self._time_range_to_hours(entities.get("time_range"))
-                    usage_stats = await self.influxdb.get_tool_stats(filter_common, hours=hour_range)
-                    logger.info(f" [ToolDebug] InfluxDB Tool Stats: {len(usage_stats)}건")
-                except Exception as e:
-                    logger.error(f" [ToolDebug] InfluxDB Tool Stats 조회 실패: {e}")
-
-                # MongoDB 공구 사용량 조회 (개선된 로직)
-                try:
-                    target_machines = []
-                    if filter_common.machine_id:
-                        target_machines.append(filter_common.machine_id)
-                    else:
-                        # 설비 미지정 시 전체 설비 조회
-                        machines = await self.mongodb.get_machines_by_filter(
-                            workshop_code=filter_common.workshop_id,
-                            line_code=filter_common.line_id,
-                            op_code=filter_common.op_code
-                        )
-                        target_machines = [m.get("machineCode") for m in machines if m.get("machineCode")]
-                        logger.info(f" [ToolDebug] 설비 미지정 -> 대상 설비 {len(target_machines)}대 조회")
-
-                    for m_code in target_machines:
-                        # 필터 복제 및 machine_id 설정
-                        specific_filter = FilterCommon(
-                            workshop_id=filter_common.workshop_id,
-                            line_id=filter_common.line_id,
-                            op_code=filter_common.op_code,
-                            machine_id=m_code
-                        )
-                        
-                        counts = await self.mongodb.get_current_tool_counts(specific_filter)
-                        
-                        # 설비 정보 추가
-                        for c in counts:
-                            c['machineCode'] = m_code
-                            
-                        tool_counts.extend(counts)
-                        
-                    logger.info(f" [ToolDebug] 최종 수집된 Tool Counts: {len(tool_counts)}건")
-                    
-                except Exception as e:
-                    logger.error(f" [ToolDebug] MongoDB Tool Counts 조회 실패: {e}")
-            else:
-                logger.warning(" [ToolDebug] FilterCommon 생성 실패 - 필수 엔티티 누락")
-            
-            if machine_id:
-                if tool_code:
-                    tool = await self.mongodb.get_tool_by_code(machine_id, tool_code)
-                    return {"tool": tool, "usage_stats": usage_stats, "tool_counts": tool_counts} if tool else {"usage_stats": usage_stats, "tool_counts": tool_counts}
+            if user_id and user_id != "ALL":
+                # 특정 사용자 조회
+                logger.info(f"사용자 단건 조회: {user_id}")
+                user = await self.mongodb.get_user_by_id(user_id)
+                if user:
+                    return {"user": user}
                 else:
-                    tools = await self.mongodb.get_tools_by_machine(machine_id)
-                    return {"tools": tools, "usage_stats": usage_stats, "tool_counts": tool_counts}
-            return {"usage_stats": usage_stats, "tool_counts": tool_counts}
+                    logger.warning(f"사용자 {user_id}를 찾을 수 없습니다.")
+                    return {}
+            else:
+                # 전체 사용자 목록 조회
+                logger.info("전체 사용자 목록 조회")
+                users = await self.mongodb.get_all_users()
+                return {"users": users, "total_count": len(users)}
         except Exception as e:
-            logger.error(f"공구 데이터 조회 실패: {e}")
+            logger.error(f"사용자 데이터 조회 실패: {e}")
             return {}
     
 
@@ -668,6 +710,10 @@ class HybridRAGEngine:
             # 동적 필드 파싱 (콤마 구분 지원)
             raw_target = target_field or "Load"
             target_fields = [t.strip() for t in raw_target.split(",")]
+            
+            # 기본 필드 및 measurement 설정 (TREND, 기본 케이스에서 사용)
+            field = target_fields[0] if target_fields else "Load"
+            measurement = None  # 기본값
             
             measurement_map = {
                 "CT": settings.INFLUXDB_MEASUREMENT_PRODUCT,
@@ -729,9 +775,11 @@ class HybridRAGEngine:
                     result["daily_runtime"] = await self.influxdb.get_daily_runtime(filter_common, days=days)
                 
             else:
-                # 기본: 현재 상태 + 가동 중 통계
+                # 기본: 현재 상태 + 가동 중 통계 + 오늘 가동 시간
                 result["current_status"] = await self.influxdb.get_current_status(filter_common)
                 result["running_stats"] = await self.influxdb.get_running_stats(filter_common, hours=hours, field=field)
+                # 금일 가동 시간 추가 (10-1 설비의 오늘 가동 시간 등)
+                result["today_runtime"] = await self.influxdb.get_today_runtime(filter_common)
             
             return result
         except Exception as e:
@@ -759,6 +807,7 @@ class HybridRAGEngine:
                 DataSourceType.MACHINE: "MACHINE_QUERY",
                 DataSourceType.TOOL: "TOOL_QUERY",
                 DataSourceType.RAW_SENSOR: "RAW_SENSOR_QUERY",
+                DataSourceType.USER: "USER_QUERY",
                 DataSourceType.HYBRID: "HYBRID_QUERY",
             }
             question_type = source_to_question_type.get(intent.primary_source, "DOCUMENT_QUERY")
@@ -779,6 +828,8 @@ class HybridRAGEngine:
             info_blocks.append(f"[공구 정보]\n{self._format_tool_data(context.tool_data)}")
         if context.sensor_data:
             info_blocks.append(f"[실시간 센서 데이터]\n{self._format_sensor_data(context.sensor_data)}")
+        if context.user_data:
+            info_blocks.append(f"[사용자 정보]\n{self._format_user_data(context.user_data)}")
             
         full_context = "\n\n".join(info_blocks)
         
@@ -807,6 +858,7 @@ class HybridRAGEngine:
         if context.machine_data: sources_used.append("machine")
         if context.tool_data: sources_used.append("tool")
         if context.sensor_data: sources_used.append("sensor")
+        if context.user_data: sources_used.append("user")
         
         return QueryResponse(
             answer=answer,
@@ -818,48 +870,174 @@ class HybridRAGEngine:
     
     # ============ 데이터 포맷팅 메서드 ============
     
+    def _to_kst(self, date_val: Union[datetime, str, None]) -> str:
+        """UTC 시간을 KST(UTC+9) 문자열로 변환"""
+        if not date_val:
+            return "-"
+        
+        try:
+            # 문자열인 경우 datetime으로 파싱
+            if isinstance(date_val, str):
+                # ISO 포맷 처리 (milliseconds, Z 등)
+                date_val = date_val.replace('Z', '+00:00')
+                try:
+                    dt = datetime.fromisoformat(date_val)
+                except ValueError:
+                    # fromisoformat이 실패하면 날짜 형식에 맞춰 파싱 시도 (예: YYYY-MM-DD HH:MM:SS)
+                    dt = datetime.strptime(date_val, "%Y-%m-%d %H:%M:%S")
+            else:
+                dt = date_val
+                
+            # datetime 객체가 맞다면 9시간 더하기
+            if isinstance(dt, datetime):
+                kst_time = dt + timedelta(hours=9)
+                return kst_time.strftime('%Y-%m-%d %H:%M:%S')
+                
+        except Exception as e:
+            logger.warning(f"KST 변환 실패 ({date_val}): {e}")
+            
+        return str(date_val)
+
+    def _normalize_value(self, val: Union[float, int, str], is_ct: bool = False) -> str:
+        """값 정규화 및 포맷팅 (CT는 초 단위 변환)"""
+        if val is None or val == '-':
+            return '-'
+            
+        try:
+            v = float(val)
+            # CT 값이고 1,000,000 이상이면 나노초로 간주하여 초 단위 변환
+            if is_ct and v > 1000000:
+                v = v / 1e9
+                
+            return f"{v:.2f}"
+            
+        except (ValueError, TypeError):
+            return str(val)
+
     def _format_production_data(self, data: Dict) -> str:
-        """생산 데이터 포맷팅"""
+        """생산 데이터 포맷팅 - 결과 판정 및 상세 정보 추가"""
         if not data:
             return "데이터 없음"
         
-        lines = ["### [MongoDB] 생산 이력 및 집계 정보"]
+        lines = ["### [MongoDB] 생산 이력 정보"]
+        
+        # 통계 정보
         if "stats" in data:
             stats = data["stats"]
-            lines.append(f"* 조회 기간 내 생산 수: {stats.get('count', 0)}건")
+            lines.append(f"\n📊 **통계 요약**:")
+            lines.append(f"  - 조회 기간 내 생산: {stats.get('count', 0)}건")
             ct = stats.get("ct", {})
             if ct.get("avg"):
-                lines.append(f"* 평균 CT: {ct['avg']:.2f}초 (최대: {ct.get('max', 0):.2f}, 최소: {ct.get('min', 0):.2f})")
+                lines.append(f"  - 평균 CT: {ct['avg']:.2f}초")
             loadsum = stats.get("loadSum", {})
             if loadsum.get("avg"):
-                lines.append(f"* 평균 LoadSum: {loadsum['avg']:.2f}")
+                lines.append(f"  - 평균 LoadSum: {loadsum['avg']:.2f}")
+
+
         
+        # 최근 생산 이력
         if "recent_products" in data and data["recent_products"]:
-            lines.append(f"\n최근 생산 이력 ({len(data['recent_products'])}건):")
-            for p in data["recent_products"][:5]:
-                lines.append(f"  - {p.get('productNo', 'N/A')}: 결과={p.get('productResult', '-')}")
+            lines.append(f"\n📋 **최근 생산 이력** ({len(data['recent_products'])}건):")
+            for p in data["recent_products"][:30]:
+                product_no = p.get('productNo', 'N/A')
+                result = p.get('productResult', 'N/A')
+                count = p.get('count', 0)
+                
+                # 상세 정보 구성
+                details = []
+                
+                # CT
+                ct = p.get('ct', 0)
+                ct_res = p.get('ctResult', 'N/A')
+                ct_icon = '✅' if ct_res == 'Y' else '❌'
+                ct_val = self._normalize_value(ct, is_ct=True)
+                details.append(f"CT: {ct_val} ({ct_icon})")
+                
+                # Load
+                load = p.get('loadSum', 0)
+                load_res = p.get('loadSumResult', 'N/A')
+                load_icon = '✅' if load_res == 'Y' else '❌'
+                load_val = self._normalize_value(load, is_ct=False)
+                details.append(f"Load: {load_val} ({load_icon})")
+                
+                # AI
+                ai = p.get('ai', 0)
+                ai_res = p.get('aiResult', 'N/A')
+                ai_icon = '✅' if ai_res == 'Y' else '❌'
+                details.append(f"AI: {ai} ({ai_icon})")
+                
+                # CNC Params
+                cnc = []
+                if p.get('mainProgramNo'): cnc.append(f"M:{p.get('mainProgramNo')}")
+                if p.get('tCode'): cnc.append(f"T:{p.get('tCode')}")
+                if p.get('fov'): cnc.append(f"F:{p.get('fov')}")
+                
+                param_str = f", Params=[{', '.join(cnc)}]" if cnc else ""
+                
+                lines.append(f"  - [{result}] {product_no} | 수량: {count} | {', '.join(details)}{param_str}")
         
         return "\n".join(lines)
+
     
     def _format_abnormal_data(self, data: Dict) -> str:
-        """이상감지 데이터 포맷팅"""
+        """이상감지 데이터 포맷팅 - Summary와 Details 구분"""
         if not data:
             return "데이터 없음"
         
         lines = ["### [MongoDB] 이상감지 발생 현황 정보"]
-        if "summary" in data:
-            summary = data["summary"]
-            lines.append(f"* 총 이상감지 건수: {summary.get('total', 0)}건")
-            by_code = summary.get("by_code", {})
+        
+        # 1. 생산품별 최종 판정 (abnormalSummary 컬렉션)
+        if "summary_records" in data and data["summary_records"]:
+            lines.append("\n📊 **생산품별 이상 판정 (최종 상태)**:")
+            for s in data["summary_records"][:30]:
+                product_no = s.get('productNo', 'N/A')
+                
+                status_parts = []
+                if s.get('abnormalCt') == 'N':
+                    val = self._normalize_value(s.get('abnormalCtValue'), is_ct=True)
+                    status_parts.append(f"⚠️CT: {val}")
+                else:
+                    status_parts.append("✅CT")
+                
+                if s.get('abnormalLoad') == 'N':
+                    val = self._normalize_value(s.get('abnormalLoadValue'))
+                    status_parts.append(f"⚠️Load: {val}")
+                else:
+                    status_parts.append("✅Load")
+                
+                if s.get('abnormalAi') == 'N':
+                    val = s.get('abnormalAiValue', 0)
+                    status_parts.append(f"⚠️AI: {val}건")
+                else:
+                    status_parts.append("✅AI")
+                
+                status_str = " | ".join(status_parts)
+                lines.append(f"  - {product_no}: {status_str}")
+        
+        # 2. 집계 통계 (기존 summary)
+        if "stats" in data and data["stats"]:
+            stats = data["stats"]
+            lines.append(f"\n📈 **통계 요약**:")
+            lines.append(f"  - 총 이상감지 건수: {stats.get('total', 0)}건")
+            by_code = stats.get("by_code", {})
             if by_code:
-                lines.append(f"* 유형별 발생: {', '.join([f'{k}={v}건' for k, v in by_code.items()])}")
+                lines.append(f"  - 유형별 발생: {', '.join([f'{k}={v}건' for k, v in by_code.items()])}")
         
         if "recent_abnormals" in data and data["recent_abnormals"]:
-            lines.append(f"\n최근 이상감지 이력 ({len(data['recent_abnormals'])}건):")
-            for a in data["recent_abnormals"][:5]:
-                lines.append(f"  - {a.get('abnormalCode', 'N/A')}: 값={a.get('abnormalValue', '-')}, 공구={a.get('abnormalTool', '-')}")
+            lines.append(f"\n📋 **최근 이상감지 상세 이력** ({len(data['recent_abnormals'])}건):")
+            for a in data["recent_abnormals"][:20]: # LLM에게 더 많은 컨텍스트 제공
+                begin_date = self._to_kst(a.get('abnormalBeginDate'))
+                code = a.get('abnormalCode', 'N/A')
+                
+                is_ct = 'CT' in code.upper()
+                val = self._normalize_value(a.get('abnormalValue'), is_ct=is_ct)
+                
+                tool = a.get('abnormalTool', '-')
+                
+                lines.append(f"  - [{begin_date}] {code}: 값={val}, 공구={tool}")
         
         return "\n".join(lines)
+
     
     def _format_machine_data(self, data: Dict) -> str:
         """설비 데이터 포맷팅"""
@@ -1004,13 +1182,39 @@ class HybridRAGEngine:
         return "데이터 없음"
     
     def _format_tool_data(self, data: Dict) -> str:
-        """공구 데이터 포맷팅"""
+        """공구 데이터 포맷팅 - InfluxDB 통계 + MongoDB 이력/현황"""
         if not data:
             return "데이터 없음"
         
         lines = []
         
-        # 1. InfluxDB 데이터 (이력 통계)
+        # 1. [MongoDB] 공구 상세 이력 및 통계 (NEW)
+        if "history" in data and data["history"]:
+            lines.append("### [MongoDB] 공구 상세 이력 및 통계")
+            
+            # 통계 정보
+            if "history_stats" in data and data["history_stats"]:
+                s = data["history_stats"]
+                lines.append(f"\n📊 **사용 통계 요약** (최근 7일):")
+                lines.append(f"  - 총 사용 횟수: {s.get('totalUseCount', 0)}회")
+                if s.get('avgCt'):
+                    lines.append(f"  - 평균 CT: {s.get('avgCt'):.2f}초")
+                if s.get('avgLoadSum'):
+                    lines.append(f"  - 평균 LoadSum: {s.get('avgLoadSum'):.2f}")
+            
+            # 상세 이력
+            lines.append(f"\n📋 **상세 이력** ({len(data['history'])}건):")
+            for h in data["history"][:30]:
+                tool_code = h.get('toolCode', 'N/A')
+                use_count = h.get('toolUseCount', 0)
+                ct = h.get('toolCt', 0)
+                load_sum = h.get('toolLoadSum', 0)
+                date_str = self._to_kst(h.get('toolUseStartDate'))
+                
+                lines.append(f"  - {date_str} | {tool_code}: 사용 {use_count}회, CT: {ct:.2f}, Load: {load_sum:.2f}")
+            lines.append("")
+
+        # 2. [InfluxDB] 사용 통계
         if "usage_stats" in data and data["usage_stats"]:
             stats = data["usage_stats"]
             period = stats[0].get('period_hours', 24) if stats else 24
@@ -1020,7 +1224,7 @@ class HybridRAGEngine:
                  lines.append(f"* 공구 {s.get('tool_code')}: {s.get('total_use_count')}회 사용")
             lines.append("")
             
-        # 2. MongoDB 데이터 (실시간 현황)
+        # 3. [MongoDB] 공구 실시간 사용량
         if "tool_counts" in data and data["tool_counts"]:
             tc_list = data["tool_counts"]
             lines.append(f"### [MongoDB] 공구 실시간 사용량 및 수명 정보")
@@ -1039,8 +1243,22 @@ class HybridRAGEngine:
                 
                 for tc in sorted_tools:
                     status = tc.get('status', 'OK')
+
                     icon = "🟢" if status == "OK" else "🟡" if status == "WARN" else "🔴"
-                    lines.append(f"* {tc.get('toolCode')}: {tc.get('useCount', 0)}/{tc.get('maxCount', 0)}회 ({tc.get('usageRate', 0)}%) {icon}")
+                    tool_info = f"* {tc.get('toolCode')}: {tc.get('useCount', 0)}/{tc.get('maxCount', 0)}회 ({tc.get('usageRate', 0)}%) {icon}"
+                    
+                    details = []
+                    if tc.get('subToolCode'):
+                        details.append(f"예비: {tc.get('subToolCode')}")
+                    if tc.get('toolOrder'):
+                        details.append(f"순서: {tc.get('toolOrder')}")
+                    if tc.get('warnRate'):
+                        details.append(f"알람: {tc.get('warnRate')}%")
+                        
+                    if details:
+                        tool_info += f"\n    - 상세: {', '.join(details)}"
+                    
+                    lines.append(tool_info)
             lines.append("")
         
         if "tool" in data:
@@ -1161,7 +1379,7 @@ class HybridRAGEngine:
             trend = data["trend"]
             if trend:
                 lines.append(f"\n[Load 트렌드 ({len(trend)}개 포인트)]")
-                for t in trend[:10]:  # 최대 10개만 표시
+                for t in trend[:30]:  # 최대 30개만 표시
                     time_str = t.get('time', 'N/A')
                     if hasattr(time_str, 'strftime'):
                         time_str = time_str.strftime("%H:%M")
@@ -1175,6 +1393,8 @@ class HybridRAGEngine:
             lines.append(f"* 가동 시간: {rt.get('runtime_hours', 0)}시간 ({rt.get('runtime_minutes', 0)}분)")
             lines.append(f"* 가동률: {rt.get('operating_rate', 0)}%")
         
+        total = None
+
         if "daily_runtime" in data:
             daily_data = data["daily_runtime"]
             daily_list = daily_data.get("daily", [])
@@ -1189,6 +1409,12 @@ class HybridRAGEngine:
                     # 가동률에 따른 상태 아이콘
                     icon = "🟢" if rate > 80 else "🟡" if rate > 50 else "🔴"
                     lines.append(f"* {date_str}: {hours}시간 ({rate}%) {icon}")
+        
+        if "today_runtime" in data:
+            tr = data["today_runtime"]
+            lines.append(f"\n[오늘 가동 시간/률 (00:00~현재)]")
+            lines.append(f"* 가동 시간: {tr.get('runtime_hours', 0)}시간 ({tr.get('runtime_minutes', 0)}분)")
+            lines.append(f"* 현재 가동률: {tr.get('operating_rate', 0)}% (기준: {tr.get('total_elapsed_seconds', 0)/3600:.1f}시간 경과)")
             
             if total:
                 lines.append(f"\n[총 가동률]")
@@ -1341,6 +1567,56 @@ class HybridRAGEngine:
                 lines.append(f"* 총 생산 횟수(집계): {total.get('count', 0)}회")
         
         return "\n".join(lines)
+    
+    def _format_user_data(self, data: Dict) -> str:
+        """사용자 데이터 포맷팅 (비밀번호 제외 보장)"""
+        if not data:
+            return "데이터 없음"
+        
+        lines = ["### [MongoDB] 사용자 정보"]
+        
+        # 단일 사용자 조회
+        if "user" in data:
+            u = data["user"]
+            lines.append(f"* 사용자 ID: {u.get('userId', 'N/A')}")
+            lines.append(f"* 이름: {u.get('userName', 'N/A')}")
+            
+            # 권한 레벨 표시
+            role = u.get('userRole', 0)
+            role_text = {0: "일반 사용자", 1: "관리자", 2: "슈퍼 관리자"}.get(role, f"권한 레벨 {role}")
+            lines.append(f"* 권한: {role_text}")
+            
+            # 계정 상태
+            if u.get('resetFlag') == 'Y':
+                lines.append("* 상태: 비밀번호 재설정 필요")
+            else:
+                lines.append("* 상태: 정상")
+            
+            # 생성일
+            if u.get('createAt'):
+                lines.append(f"* 계정 생성일: {u.get('createAt')}")
+            
+            return "\n".join(lines)
+        
+        # 전체 사용자 목록
+        if "users" in data:
+            lines.append(f"총 {data.get('total_count', 0)}명의 등록된 사용자:")
+            
+            for u in data["users"]:
+                role = u.get('userRole', 0)
+                role_text = {0: "일반", 1: "관리자", 2: "슈퍼관리자"}.get(role, f"권한{role}")
+                
+                user_info = f"  - {u.get('userId', 'N/A')}: {u.get('userName', 'N/A')} ({role_text})"
+                
+                # 재설정 필요한 계정 표시
+                if u.get('resetFlag') == 'Y':
+                    user_info += " [비밀번호 재설정 필요]"
+                
+                lines.append(user_info)
+            
+            return "\n".join(lines)
+        
+        return "데이터 없음"
 
     async def _handle_general_conversation(self, original_q: str, aware_q: str, hist_key: str, start_time: float) -> QueryResponse:
         """데이터 소스가 없을 시 일반 대화로 응답"""

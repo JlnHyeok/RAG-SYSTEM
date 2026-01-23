@@ -140,9 +140,13 @@ class InfluxDBConnector:
         results = []
         for table in tables:
             for record in table.records:
+                # _time이나 _field가 없는 경우(집계 등)를 대비해 안전하게 조회
+                time_val = record.get_time() if "_time" in record.values else None
+                field_val = record.get_field() if "_field" in record.values else None
+                
                 result = {
-                    "time": record.get_time(),
-                    "field": record.get_field(),
+                    "time": time_val,
+                    "field": field_val,
                     "value": record.get_value(),
                 }
                 # 태그 추가
@@ -324,7 +328,7 @@ class InfluxDBConnector:
           |> filter(fn: (r) => r["_measurement"] == "{self.measurement_raw}")
           |> filter(fn: (r) => {self._build_did_filter(filter_common)})
           |> filter(fn: (r) => r["_field"] == "Run" or r["_field"] == "{field}")
-          |> pivot(rowKey:["_time"], colKey:["_field"], valueColumn:"_value")
+          |> pivot(rowKey:["_time"], columnKey:["_field"], valueColumn:"_value")
           |> filter(fn: (r) => r["Run"] > 0)
           |> drop(columns: ["_start", "_stop"])
         '''
@@ -338,7 +342,7 @@ class InfluxDBConnector:
             elif stat_fn == "min":
                 query = f'{base_query} |> min(column: "{field}")'
             
-            query += f' |> rename(columns: {{{"{field}": "_value"}}})'
+            query += f' |> rename(columns: {{"{field}": "_value"}})'
                 
             try:
                 results = self._execute_query(query)
@@ -476,26 +480,22 @@ class InfluxDBConnector:
             return []
 
     async def get_machine_runtime(self, filter: FilterCommon, hours: int = 24) -> Dict[str, Any]:
-        """설비 가동 시간 조회 (Run=3 상태 집계)"""
-    async def get_machine_runtime(self, filter: FilterCommon, hours: int = 24) -> Dict[str, Any]:
-        """설비 가동 시간 조회 (Run=3 상태 집계)"""
-        # did 태그가 없어도 실행 (전체/Regex 조회)
+        """설비 가동 시간 조회 - 1초 단위 Count 집계"""
+        # Flux Query: Run > 0인 데이터를 1초 단위로 윈도우를 만들어 데이터가 존재하는 윈도우 개수를 세서 초 단위 시간 계산
         
-        # Run 상태가 3(가동중)인 데이터 포인트 개수 * 수집주기(초) 
-        # 정확한 계산을 위해 상태 지속 시간을 계산해야 하지만, 여기서는 근사치로 계산
         query = f'''
         from(bucket: "{self.bucket}")
           |> range(start: -{hours}h)
           |> filter(fn: (r) => r["_measurement"] == "{settings.INFLUXDB_MEASUREMENT_RAW}")
           |> filter(fn: (r) => {self._build_did_filter(filter)})
           |> filter(fn: (r) => r["_field"] == "Run")
-          |> filter(fn: (r) => r["_value"] == 3)
-          |> count() 
+          |> filter(fn: (r) => r["_value"] > 0)
+          |> aggregateWindow(every: 1s, fn: count, createEmpty: false)
+          |> count()
         '''
         
         try:
-            # 디버깅을 위한 쿼리 로그
-            logger.info(f"Flux Query Execution (Machine Runtime):\n{query.strip()}")
+            logger.info(f"Flux Query Execution (Machine Runtime - Count 1s):\n{query.strip()}")
             loop = asyncio.get_running_loop()
             result = await loop.run_in_executor(None, lambda: self.query_api.query(query=query, org=self.org))
             
@@ -510,10 +510,10 @@ class InfluxDBConnector:
             operating_rate = (runtime_seconds / total_seconds) * 100 if total_seconds > 0 else 0
             
             return {
-                "runtime_seconds": runtime_seconds,
+                "runtime_seconds": round(runtime_seconds, 2),
                 "runtime_minutes": round(runtime_seconds / 60, 1),
                 "runtime_hours": round(runtime_seconds / 3600, 2),
-                "operating_rate": round(operating_rate, 2),
+                "operating_rate": round(min(operating_rate, 100), 2), 
                 "period_hours": hours
             }
         except Exception as e:
@@ -521,23 +521,24 @@ class InfluxDBConnector:
             return {"runtime_seconds": 0, "operating_rate": 0.0}
     
     async def get_daily_runtime(self, filter: FilterCommon, days: int = 7) -> Dict[str, Any]:
-        """일별 가동 시간/률 조회 (각 일별 + 총 가동률)"""
+        """일별 가동 시간/률 조회 (각 일별 + 총 가동률) - 1초 단위 Count 집계"""
         logger.info(f"get_daily_runtime 호출: filter={filter.to_dict()}, days={days}")
         
-        # 일별 Run=3 카운트 집계
+        # 일별: 1초 단위로 정규화된 가동 시간(초)을 다시 일별로 합산(sum)
+        # aggregateWindow 2번 사용: 1s count -> 1d sum
         query = f'''
         from(bucket: "{self.bucket}")
           |> range(start: -{days}d)
           |> filter(fn: (r) => r["_measurement"] == "{settings.INFLUXDB_MEASUREMENT_RAW}")
           |> filter(fn: (r) => {self._build_did_filter(filter)})
           |> filter(fn: (r) => r["_field"] == "Run")
-          |> filter(fn: (r) => r["_value"] == 3)
-          |> aggregateWindow(every: 1d, fn: count, createEmpty: true, location: {{ zone: "Asia/Seoul", offset: 0s}})
+          |> filter(fn: (r) => r["_value"] > 0)
+          |> aggregateWindow(every: 1s, fn: count, createEmpty: false)
+          |> aggregateWindow(every: 1d, fn: sum, createEmpty: true, location: {{ zone: "Asia/Seoul", offset: 0s}})
         '''
         
         try:
-            # 디버깅을 위한 쿼리 로그 (사용자 요청)
-            logger.info(f"Flux Query Execution (Daily Runtime):\n{query.strip()}")
+            logger.info(f"Flux Query Execution (Daily Runtime - Count 1s):\n{query.strip()}")
             loop = asyncio.get_running_loop()
             result = await loop.run_in_executor(None, lambda: self.query_api.query(query=query, org=self.org))
             
@@ -547,17 +548,16 @@ class InfluxDBConnector:
             for table in result:
                 for record in table.records:
                     date = record.get_time()
-                    count = record.get_value() or 0
+                    daily_seconds = record.get_value() or 0
                     
-                    # 1일 = 86400초
-                    daily_seconds = count
-                    daily_rate = (count / 86400) * 100 if count else 0
+                    # daily_seconds는 이미 초 단위 (1초 윈도우 개수의 합)
+                    daily_rate = (daily_seconds / 86400) * 100 if daily_seconds else 0
                     
                     daily_stats.append({
                         "date": date.strftime("%Y-%m-%d") if hasattr(date, 'strftime') else str(date),
                         "runtime_seconds": daily_seconds,
                         "runtime_hours": round(daily_seconds / 3600, 2),
-                        "operating_rate": round(daily_rate, 2)
+                        "operating_rate": round(min(daily_rate, 100), 2)
                     })
                     total_runtime_seconds += daily_seconds
             
@@ -574,31 +574,83 @@ class InfluxDBConnector:
                     "period_days": days,
                     "runtime_seconds": total_runtime_seconds,
                     "runtime_hours": round(total_runtime_seconds / 3600, 2),
-                    "operating_rate": round(total_rate, 2)
+                    "operating_rate": round(min(total_rate, 100), 2)
                 }
             }
         except Exception as e:
             logger.error(f"일별 가동 시간 조회 실패: {e}")
             return {"daily": [], "total": {"runtime_seconds": 0, "operating_rate": 0.0}}
     
+    async def get_today_runtime(self, filter: FilterCommon) -> Dict[str, Any]:
+        """오늘(00:00~현재) 설비 가동 시간 조회 - Run 필드 Sum 집계"""
+        # 한국 시간 기준 오늘 0시 구하기
+        from datetime import datetime
+        import pytz
+        
+        kst = pytz.timezone('Asia/Seoul')
+        now_kst = datetime.now(kst)
+        start_of_day = now_kst.replace(hour=0, minute=0, second=0, microsecond=0)
+        
+        # Flux Query: 00:00부터 현재까지
+        # Run 필드값을 Sum하여 가동 시간(ms) 계산
+        start_iso = start_of_day.isoformat()
+        
+        query = f'''
+        from(bucket: "{self.bucket}")
+          |> range(start: {start_iso})
+          |> filter(fn: (r) => r["_measurement"] == "{settings.INFLUXDB_MEASUREMENT_RAW}")
+          |> filter(fn: (r) => {self._build_did_filter(filter)})
+          |> filter(fn: (r) => r["_field"] == "Run")
+          |> filter(fn: (r) => r["_value"] == 3)
+          |> aggregateWindow(every: 1d, fn: sum, createEmpty: false)
+        '''
+        
+        try:
+            logger.info(f"Flux Query Execution (Today Runtime - Sum):\n{query.strip()}")
+            loop = asyncio.get_running_loop()
+            result = await loop.run_in_executor(None, lambda: self.query_api.query(query=query, org=self.org))
+            
+            runtime_seconds = 0
+            for table in result:
+                for record in table.records:
+                    if record.get_value():
+                        runtime_seconds = record.get_value()
+            
+            # 가동률 계산: 가동 시간(ms) / (24시간 * 60분 * 60초 * 1000ms)
+            # Run 필드의 Sum은 초 단위 가동 시간을 의미한다고 가정 (1Hz 데이터)
+            twenty_four_hours_ms = 24 * 60 * 60 * 1000
+            runtime_ms = runtime_seconds * 1000
+            operating_rate = (runtime_ms / twenty_four_hours_ms) * 100
+            
+            return {
+                "runtime_seconds": round(runtime_seconds, 2),
+                "runtime_minutes": round(runtime_seconds / 60, 1),
+                "runtime_hours": round(runtime_seconds / 3600, 2),
+                "operating_rate": round(min(operating_rate, 100), 2),
+                "total_elapsed_seconds": round(twenty_four_hours_ms / 1000, 2)
+            }
+        except Exception as e:
+            logger.error(f"오늘 가동 시간 조회 실패: {e}")
+            return {"runtime_seconds": 0, "operating_rate": 0.0}
+
     async def get_weekly_runtime(self, filter: FilterCommon, weeks: int = 4) -> Dict[str, Any]:
-        """주별 가동 시간/률 조회 (30일 초과 기간용)"""
+        """주별 가동 시간/률 조회 (30일 초과 기간용) - 1초 단위 Count 집계"""
         logger.info(f"get_weekly_runtime 호출: filter={filter.to_dict()}, weeks={weeks}")
         
-        # 주별 Run=3 카운트 집계
+        # 1s count -> 1w sum
         query = f'''
         from(bucket: "{self.bucket}")
           |> range(start: -{weeks}w)
           |> filter(fn: (r) => r["_measurement"] == "{settings.INFLUXDB_MEASUREMENT_RAW}")
           |> filter(fn: (r) => {self._build_did_filter(filter)})
           |> filter(fn: (r) => r["_field"] == "Run")
-          |> filter(fn: (r) => r["_value"] == 3)
-          |> aggregateWindow(every: 1w, fn: count, createEmpty: true, offset: -3d, location: {{ zone: "Asia/Seoul", offset: 0s}})
+          |> filter(fn: (r) => r["_value"] > 0)
+          |> aggregateWindow(every: 1s, fn: count, createEmpty: false)
+          |> aggregateWindow(every: 1w, fn: sum, createEmpty: true, offset: -3d, location: {{ zone: "Asia/Seoul", offset: 0s}})
         '''
         
         try:
-            # 디버깅을 위한 쿼리 로그 (사용자 요청)
-            logger.info(f"Flux Query Execution (Weekly Runtime):\n{query.strip()}")
+            logger.info(f"Flux Query Execution (Weekly Runtime - Count 1s):\n{query.strip()}")
             loop = asyncio.get_running_loop()
             result = await loop.run_in_executor(None, lambda: self.query_api.query(query=query, org=self.org))
             
@@ -608,17 +660,15 @@ class InfluxDBConnector:
             for table in result:
                 for record in table.records:
                     date = record.get_time()
-                    count = record.get_value() or 0
+                    weekly_seconds = record.get_value() or 0
                     
-                    # 1주 = 604800초 (7 * 86400)
-                    weekly_seconds = count
-                    weekly_rate = (count / 604800) * 100 if count else 0
+                    weekly_rate = (weekly_seconds / 604800) * 100 if weekly_seconds else 0
                     
                     weekly_stats.append({
                         "week_start": date.strftime("%Y-%m-%d") if hasattr(date, 'strftime') else str(date),
                         "runtime_seconds": weekly_seconds,
                         "runtime_hours": round(weekly_seconds / 3600, 2),
-                        "operating_rate": round(weekly_rate, 2)
+                        "operating_rate": round(min(weekly_rate, 100), 2)
                     })
                     total_runtime_seconds += weekly_seconds
             
@@ -635,7 +685,7 @@ class InfluxDBConnector:
                     "period_weeks": weeks,
                     "runtime_seconds": total_runtime_seconds,
                     "runtime_hours": round(total_runtime_seconds / 3600, 2),
-                    "operating_rate": round(total_rate, 2)
+                    "operating_rate": round(min(total_rate, 100), 2)
                 }
             }
         except Exception as e:
@@ -643,23 +693,23 @@ class InfluxDBConnector:
             return {"weekly": [], "total": {"runtime_seconds": 0, "operating_rate": 0.0}}
     
     async def get_monthly_runtime(self, filter: FilterCommon, months: int = 12) -> Dict[str, Any]:
-        """월별 가동 시간/률 조회 (12주 초과 기간용)"""
+        """월별 가동 시간/률 조회 (12주 초과 기간용) - 1초 단위 Count 집계"""
         logger.info(f"get_monthly_runtime 호출: filter={filter.to_dict()}, months={months}")
         
-        # 월별 Run=3 카운트 집계
+        # 1s count -> 1mo sum
         query = f'''
         from(bucket: "{self.bucket}")
           |> range(start: -{months}mo)
           |> filter(fn: (r) => r["_measurement"] == "{settings.INFLUXDB_MEASUREMENT_RAW}")
           |> filter(fn: (r) => {self._build_did_filter(filter)})
           |> filter(fn: (r) => r["_field"] == "Run")
-          |> filter(fn: (r) => r["_value"] == 3)
-          |> aggregateWindow(every: 1mo, fn: count, createEmpty: true, location: {{ zone: "Asia/Seoul", offset: 0s}})
+          |> filter(fn: (r) => r["_value"] > 0)
+          |> aggregateWindow(every: 1s, fn: count, createEmpty: false)
+          |> aggregateWindow(every: 1mo, fn: sum, createEmpty: true, location: {{ zone: "Asia/Seoul", offset: 0s}})
         '''
         
         try:
-            # 디버깅을 위한 쿼리 로그 (사용자 요청)
-            logger.info(f"Flux Query Execution (Monthly Runtime):\n{query.strip()}")
+            logger.info(f"Flux Query Execution (Monthly Runtime - Count 1s):\n{query.strip()}")
             loop = asyncio.get_running_loop()
             result = await loop.run_in_executor(None, lambda: self.query_api.query(query=query, org=self.org))
             
@@ -669,17 +719,16 @@ class InfluxDBConnector:
             for table in result:
                 for record in table.records:
                     date = record.get_time()
-                    count = record.get_value() or 0
+                    monthly_seconds = record.get_value() or 0
                     
-                    # 월 평균 = 30일 = 2592000초
-                    monthly_seconds = count
-                    monthly_rate = (count / 2592000) * 100 if count else 0
+                    # 월 평균 = 30일 = 2592000초 (근사값)
+                    monthly_rate = (monthly_seconds / 2592000) * 100 if monthly_seconds else 0
                     
                     monthly_stats.append({
                         "month": date.strftime("%Y-%m") if hasattr(date, 'strftime') else str(date)[:7],
                         "runtime_seconds": monthly_seconds,
                         "runtime_hours": round(monthly_seconds / 3600, 2),
-                        "operating_rate": round(monthly_rate, 2)
+                        "operating_rate": round(min(monthly_rate, 100), 2)
                     })
                     total_runtime_seconds += monthly_seconds
             
@@ -696,7 +745,7 @@ class InfluxDBConnector:
                     "period_months": months,
                     "runtime_seconds": total_runtime_seconds,
                     "runtime_hours": round(total_runtime_seconds / 3600, 2),
-                    "operating_rate": round(total_rate, 2)
+                    "operating_rate": round(min(total_rate, 100), 2)
                 }
             }
         except Exception as e:

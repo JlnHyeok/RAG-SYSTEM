@@ -66,6 +66,7 @@ class Settings(BaseSettings):
     # MongoDB 컬렉션 설정
     MONGODB_COLLECTION_PRODUCTS: str = "products"
     MONGODB_COLLECTION_ABNORMALS: str = "abnormals"
+    MONGODB_COLLECTION_ABNORMAL_SUMMARY: str = "abnormalSummary"
     MONGODB_COLLECTION_MACHINES: str = "machineMaster"
     MONGODB_COLLECTION_TOOLS: str = "toolMaster"
     MONGODB_COLLECTION_THRESHOLDS: str = "thresholdMaster"
@@ -75,6 +76,7 @@ class Settings(BaseSettings):
     MONGODB_COLLECTION_TOOL_CHANGE: str = "tool_change"
     MONGODB_COLLECTION_TOOL_HISTORY: str = "tool_history"
     MONGODB_COLLECTION_USERS: str = "userMaster"
+
     
     # InfluxDB Measurement 설정
     INFLUXDB_MEASUREMENT_RAW: str = "cnc_analyze"

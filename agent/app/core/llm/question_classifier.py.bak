@@ -79,33 +79,62 @@ class QuestionClassifier:
     async def classify_question(self, question: str) -> QuestionAnalysisResult:
         """LLM을 사용하여 질문 분석 (의도, 엔티티, 시간, 타겟 필드 통합 추출)"""
         
-        prompt = f"""제조 현장 질문을 분석하여 JSON으로 답하세요.
-        질문: "{question}"
+        prompt = f"""사용자의 질문을 심층 분석하여 다음 정보를 JSON 형식으로 추출하세요.
+                    질문: "{question}"
 
-        질문 유형:
-        - PRODUCTION_QUERY: 생산량, 생산 이력, 제품
-        - ABNORMAL_QUERY: 알람, 에러, 불량, 이상
-        - RAW_SENSOR_QUERY: 센서, 가동, CT, 부하
-        - TOOL_QUERY: 공구 정보, 사용량
-        - MACHINE_QUERY: 설비 정보, 임계치
-        - USER_QUERY: 사용자 정보
+                    1. **질문 유형 (Query Types)**:
+                    - PRODUCTION_QUERY: 생산 수량, 생산 이력, 제품 정보 조회. ("가동 시간", "CT"는 제외)
+                    - ABNORMAL_QUERY: 알람, 에러, 불량, 이상 내역.
+                    - RAW_SENSOR_QUERY: 설비의 센서 데이터, 가동 상태, 부하, 가동 시간, CT(Cycle Time).
+                    - TOOL_QUERY: 공구 정보, 공구 사용량, 공구 수명, 공구 교체, 툴 라이프.
+                    - MACHINE_QUERY: 설비 정보, 설비 목록, **임계치**, 설정값, 설비 스펙.
+                    - USER_QUERY: 사용자 정보, 등록된 사용자, 사용자 목록, 계정 정보 조회.
+                    - **중요 규칙**: 
+                        1. "가동 시간", "CT", "부하" 등 센서/상태 관련 질문 -> **RAW_SENSOR_QUERY**.
+                        2. "생산량", "몇 개 만들었어" -> **PRODUCTION_QUERY**.
+                        3. "공구 사용량", "툴 수명", "공구 교체" -> **TOOL_QUERY**.
+                        4. "임계치", "threshold", "설정값", "설비 정보" -> **MACHINE_QUERY**.
+                        5. "사용자", "등록된 사용자", "계정", "유저" -> **USER_QUERY**.
 
-        엔티티 (있으면):
-        - machine_id: 설비 코드
-        - product_no: 생산 번호
-        - tool_code: 공구 번호
+                    2. **엔티티 (Entities)**:
+                    - machine_id: 설비 코드/번호 (예: 10-1, CNC_01). "설비", "장비" 등의 단어 제외하고 코드만 추출.
+                    - product_no: 생산 번호/제품 번호.
+                    - tool_code: 공구 번호 (예: T1, 505).
+                    - user_id: 사용자 ID (예: admin, root). 특정 사용자가 언급된 경우만 추출.
+                    - workshop_id, line_id, op_code: 언급되었을 경우만 추출.
+                    - abnormal_code: 언급된 이상 유형.
+                    - "전체", "모든" -> "ALL" 등의 값으로 매핑 가능.
 
-        시간: "24h"(기본), "7d", "30d" 등
+                    3. **시간 범위 (Time Range)**:
+                    - 질문에 언급된 기간을 찾아 표준 형식으로 변환 (Default: "24h").
+                    - 1년->"365d", 1개월->"30d", 1주->"7d", 어제->"48h" 등.
 
-        JSON만 출력:
-        {{
-        "primary_type": "QUERY_TYPE",
-        "secondary_types": [],
-        "entities": {{}},
-        "time_range": "24h"
-        }}"""
+                    4. **센서 쿼리 유형 (Sensor Query Type)**:
+                    - CURRENT_STATUS: 현재 상태
+                    - RAW_STATS: 통계 (평균/최대/최소), 부하, CT 등 데이터값 조회
+                    - TREND: 트렌드/추이
+                    - RUNTIME: 가동 시간/률
 
-        
+                    5. **조회 대상 필드 (target_field)**:
+                    - 질문이 무엇을 묻는지에 따라 표준화된 필드명 추출.
+                    - **"CT", "사이클타임" -> "CT"**
+                    - **"부하", "로드" -> "Load"**
+                    - **"가동", "운전" -> "Run"**
+                    - **"속도", "피드" -> "Feed"**
+                    - **"회전수", "RPM" -> "SpindleSpeed"** (또는 적절한 필드명)
+                    - 언급 없으면 null.
+                    - **중요**: 여러 항목 조회 시 콤마(,)로 구분하여 반환 (예: "CT, Load"). "CT랑 부하" -> "CT, Load".
+
+                    **출력 형식 (JSON Only):**
+                    {{
+                    "primary_type": "QUERY_TYPE",
+                    "secondary_types": ["QUERY_TYPE", ...],
+                    "entities": {{ ... }},
+                    "time_range": "24h",
+                    "sensor_query_type": "RAW_STATS",
+                    "target_field": "CT"
+                    }}
+                    """
 
         try:
             if hasattr(self.gemini_service, 'model') and self.gemini_service.model:
@@ -113,11 +142,13 @@ class QuestionClassifier:
                     response = self.gemini_service.model.generate_content(prompt)
                     
                     # Gemini 응답 텍스트 추출 (candidates 처리)
-                    # Gemini 응답 텍스트 추출 (candidates 처리)
                     try:
-                        text = self.gemini_service._extract_text_from_response(response)
-                        if not text:
-                            logger.warning("Gemini 응답 텍스트가 비어있음")
+                        if hasattr(response, 'text'):
+                            text = response.text
+                        elif hasattr(response, 'candidates') and response.candidates:
+                            text = response.candidates[0].content.parts[0].text
+                        else:
+                            logger.warning("Gemini 응답 형식이 예상과 다름")
                             return None
                     except Exception as e:
                         logger.warning(f"Gemini 응답 추출 실패: {e}")
@@ -189,8 +220,7 @@ class QuestionClassifier:
         sensor_keywords = ["부하", "load", "ct", "가동", "센서", "운전", "속도"]
         user_keywords = ["사용자", "유저", "계정", "등록된", "user"]
         
-        # 우선 순위 기반 매칭
-        primary = QuestionType.DOCUMENT_QUERY  # 기본값
+        # 우선 순위 기반 매칭primary = QuestionType.DOCUMENT_QUERY
         secondaries = []
         
         # 이상감지 - 최우선
@@ -218,8 +248,7 @@ class QuestionClassifier:
         # 사용자
         elif any(kw in q_lower for kw in user_keywords):
             primary = QuestionType.USER_QUERY
-        
-        logger.info(f"키워드 기반 분류: {primary}, 보조: {secondaries}")
+                logger.info(f"키워드 기반 분류: {primary}, 보조: {secondaries}")
         
         return QuestionAnalysisResult(
             primary_type=primary,

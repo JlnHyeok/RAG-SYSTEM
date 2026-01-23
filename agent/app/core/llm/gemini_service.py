@@ -127,6 +127,47 @@ class GeminiService:
             stop_sequences=[]   # 중단 시퀀스 없음으로 완전한 답변 보장
         )
     
+    def _extract_text_from_response(self, response) -> str:
+        """
+        Gemini 응답 객체에서 텍스트를 안전하게 추출
+        
+        Args:
+            response: Gemini API 응답 객체
+            
+        Returns:
+            추출된 텍스트. 실패 시 빈 문자열.
+        """
+        try:
+            # 1. candidates 존재 여부 확인
+            if not response.candidates:
+                if response.prompt_feedback:
+                    logger.warning(f"응답 차단됨 (Safety/Other): {response.prompt_feedback}")
+                return ""
+                
+            candidate = response.candidates[0]
+            
+            # 2. content.parts 확인 (비어있으면 response.text 접근 시 에러 발생 가능)
+            if not candidate.content or not candidate.content.parts:
+                finish_reason = getattr(candidate, 'finish_reason', 'UNKNOWN')
+                # 1: STOP check is checking logical integer value, but specific enums might vary.
+                # Just log if parts are empty.
+                logger.warning(f"Gemini 응답 텍스트 없음 (Finish Reason: {finish_reason})")
+                return ""
+            
+            # 3. response.text 시도 (표준 접근)
+            return response.text
+            
+        except Exception as e:
+            # 4. 예외 발생 시 수동 추출 시도
+            try:
+                if response.candidates and response.candidates[0].content.parts:
+                    return response.candidates[0].content.parts[0].text
+            except Exception:
+                pass
+                
+            logger.error(f"Gemini 텍스트 추출 실패: {e}")
+            return ""
+    
     @lru_cache(maxsize=200)
     def _cached_generate_lru(self, prompt_hash: str, prompt: str) -> str:
         """
@@ -148,16 +189,7 @@ class GeminiService:
         response = self.model.generate_content(prompt)
         
         # 안전한 텍스트 추출
-        if not response.candidates:
-            logger.warning("Gemini 응답에 candidates가 없습니다. (Safety Block 가능성 - LRU Cache)")
-            return "죄송합니다. 답변을 생성할 수 없습니다."
-            
-        try:
-            return response.text
-        except Exception:
-            if response.candidates and response.candidates[0].content.parts:
-                return response.candidates[0].content.parts[0].text
-            return ""
+        return self._extract_text_from_response(response)
     
     def _get_cached_result(self, prompt: str) -> Optional[str]:
         """
@@ -256,21 +288,7 @@ class GeminiService:
                     generation_config=self._create_generation_config(max_tokens, temperature)
                 )
                 
-                # 안전한 텍스트 추출
-                if not response.candidates:
-                    logger.warning("Gemini 응답에 candidates가 없습니다. (Safety Block 가능성)")
-                    if response.prompt_feedback:
-                        logger.warning(f"Prompt Feedback: {response.prompt_feedback}")
-                    return "죄송합니다. 답변을 생성할 수 없습니다 (안전 정책 또는 오류)."
-                
-                try:
-                    return response.text
-                except Exception as e:
-                    logger.error(f"response.text 추출 실패: {e}")
-                    # 대체 접근 시도
-                    if response.candidates and response.candidates[0].content.parts:
-                        return response.candidates[0].content.parts[0].text
-                    return ""
+                return self._extract_text_from_response(response)
             
             result = await asyncio.to_thread(generate)
             
@@ -309,7 +327,7 @@ class GeminiService:
                     full_prompt,
                     generation_config=self._create_generation_config(max_tokens, temperature)
                 )
-                return response.text
+                return self._extract_text_from_response(response)
             
             return await asyncio.to_thread(generate)
             
@@ -333,12 +351,27 @@ class GeminiService:
                 4. 가능하면 구체적인 근거를 제시하세요
                 5. 출처 정보가 있다면 언급해주세요
                 6. 답변을 완전히 끝까지 작성하세요 - 중간에 끊지 마세요
-                7. 표나 목록이 있다면 모든 항목을 포함하세요
+                
+                7. [🚨 CRITICAL - 절대 규칙] 컨텍스트에 비슷한 형식의 데이터가 3개 이상 반복된다면:
+                   ✅ 필수 준수: 반드시 Markdown 표(Table) 형식으로 작성하세요
+                   
+                   표 작성 필수 요구사항:
+                   - 상태 컬럼에는 반드시 아이콘과 텍스트 사용: ✅ (정상), ⚠️ (경고/이상), ❌ (불량/에러)
+                   - 컨텍스트에 이미 아이콘이 포함되어 있다면 그대로 사용하세요
+                   
+                   🔑 중요 정보 누락 금지:
+                   - 컨텍스트에 있는 핵심 정보를 생략하지 마세요
+                   - 컨텍스트에 여러 섹션의 데이터가 있다면 (예: "생산품별 이상 판정", "최근 이상감지 상세 이력" 등) 모든 섹션을 빠짐없이 표로 작성하세요
+                   
+                   📐 표 정렬 및 가독성:
+                   - 너비가 불규칙한 경우, 표의 너비를 넓게 조정하여 가독성을 높이세요
+                   - 너무 긴 값은 적절히 줄여서 표시하되 중요 정보는 유지하세요
+                   
                 8. 상세하고 완성된 답변을 제공하세요
                 컨텍스트:
                 {context}
                 질문: {question}
-                답변 (완전하고 상세하게 작성):"""
+                답변 (표 형식 필수, 완전하고 상세하게 작성):"""
     
     async def generate_summary(self, text: str, max_length: int = 200) -> str:
         """텍스트 요약 생성"""
@@ -356,7 +389,7 @@ class GeminiService:
                     prompt,
                     generation_config=self._create_generation_config(max_length * 2, 0.3)  # 한국어 특성상 여유분, 낮은 temperature
                 )
-                return response.text
+                return self._extract_text_from_response(response)
                 
             return await asyncio.to_thread(generate)
             
@@ -377,7 +410,8 @@ class GeminiService:
             
             def generate():
                 response = self.model.generate_content(prompt)
-                keywords_text = response.text.strip()
+                text = self._extract_text_from_response(response)
+                keywords_text = text.strip()
                 return [kw.strip() for kw in keywords_text.split(',')]
                 
             return await asyncio.to_thread(generate)

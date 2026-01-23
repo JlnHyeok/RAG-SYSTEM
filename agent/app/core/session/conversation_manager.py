@@ -56,22 +56,27 @@ class ConversationManager:
             # LLM으로 맥락 분석 및 질문 보완
             prompt = f"""이전 대화 히스토리와 현재 질문을 보고 질문을 보완해주세요.
 
-이전 대화:
-{self.format_history_for_prompt(history)}
+                        이전 대화:
+                        {self.format_history_for_prompt(history)}
 
-현재 질문: "{question}"
+                        현재 질문: "{question}"
 
-만약 현재 질문이 이전 대화와 연관된 부가 질문이라면, 맥락을 포함하여 완전한 질문으로 변환해주세요.
-예: "별표1이 뭔지 모르겠어" → "여비 규정에서 언급된 별표1이 무엇을 의미하는지 알려주세요"
+                        만약 현재 질문이 이전 대화와 연관된 부가 질문이라면, 맥락을 포함하여 완전한 질문으로 변환해주세요.
+                        예: "별표1이 뭔지 모르겠어" → "여비 규정에서 언급된 별표1이 무엇을 의미하는지 알려주세요"
 
-만약 독립적인 질문이라면 원래 질문을 그대로 반환해주세요.
+                        만약 독립적인 질문이라면 원래 질문을 그대로 반환해주세요.
 
-보완된 질문만 답변하세요:"""
+                        보완된 질문만 답변하세요:"""
 
             if hasattr(self.gemini_service, 'model') and self.gemini_service.model:
                 def analyze():
                     response = self.gemini_service.model.generate_content(prompt)
-                    enhanced_question = response.text.strip()
+                    enhanced_question = self.gemini_service._extract_text_from_response(response).strip()
+                    
+                    # 빈 응답이면 원본 질문 사용
+                    if not enhanced_question:
+                        return question, False
+                    
                     # 원본과 다르면 맥락적 질문으로 판단
                     is_contextual = enhanced_question != question and len(enhanced_question) > len(question)
                     return enhanced_question, is_contextual
