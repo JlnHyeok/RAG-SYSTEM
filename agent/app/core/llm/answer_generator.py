@@ -129,7 +129,8 @@ class AnswerGenerator:
             instructions = """
             1. **데이터 소스별 구분**: MongoDB의 설비 마스터 정보와 InfluxDB의 최근 가동률(Operating Rate) 정보를 구분하여 보고하세요.
             2. **설비/공구 현황**: 설비별 등록 정보와 현재 장착된 공구의 마스터 정보를 일목요연하게 정리하세요.
-            3. **상태 종합**: 가동 이력과 마스터 설정을 종합하여 설비의 전반적인 건전성을 평가하세요.
+            3. **[공구 매핑 필수]**: "사용 공구" 또는 "Used Tool" 목록이 제공되면, 해당 순서대로 T1, T2, T3, T4...와 매핑하여 표시하세요. (예: "T1: 505, T2: 303...")
+            4. **상태 종합**: 가동 이력과 마스터 설정을 종합하여 설비의 전반적인 건전성을 평가하세요.
             """
             tone = "✅ **친절한/명확한 톤**: 정보를 정돈해서 알기 쉽게 전달"
             data_source_label = "DB 조회 결과 (설비 마스터 데이터)"
@@ -250,19 +251,21 @@ class AnswerGenerator:
                             {context[:2000]}
                             위 문서 내용을 바탕으로 질문에 대해 상세하고 완전한 답변을 해주세요."""
 
-        if hasattr(self.gemini_service, 'model') and self.gemini_service.model:
+        if hasattr(self.gemini_service, 'client') and self.gemini_service.client:
             def generate():
                 config = self.gemini_service._create_generation_config(4096, 0.3)
-                response = self.gemini_service.model.generate_content(
-                    simple_prompt,
-                    generation_config=config
+                # SDK 1.0+: client.models.generate_content
+                response = self.gemini_service.client.models.generate_content(
+                    model=self.gemini_service.model_name,
+                    contents=simple_prompt,
+                    config=config
                 )
                 return self.gemini_service._extract_text_from_response(response)
             
             result = await asyncio.to_thread(generate)
             return text_processor.remove_duplicate_content(result)
         
-        raise Exception("Gemini 모델이 초기화되지 않음")
+        raise Exception("Gemini client가 초기화되지 않음")
     
     async def _create_enhanced_answer(
         self, 
@@ -312,10 +315,14 @@ class AnswerGenerator:
                                    {context[:1500]}
                                    답변:"""
             
-            if hasattr(self.gemini_service, 'model') and self.gemini_service.model:
+            if hasattr(self.gemini_service, 'client') and self.gemini_service.client:
                 def generate():
-                    response = self.gemini_service.model.generate_content(fallback_prompt)
-                return self.gemini_service._extract_text_from_response(response)
+                    # SDK 1.0+: client.models.generate_content
+                    response = self.gemini_service.client.models.generate_content(
+                        model=self.gemini_service.model_name,
+                        contents=fallback_prompt
+                    )
+                    return self.gemini_service._extract_text_from_response(response)
                 
                 result = await asyncio.to_thread(generate)
                 if len(result.strip()) > 30:

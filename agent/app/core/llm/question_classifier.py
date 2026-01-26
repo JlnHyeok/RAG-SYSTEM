@@ -79,40 +79,64 @@ class QuestionClassifier:
     async def classify_question(self, question: str) -> QuestionAnalysisResult:
         """LLM을 사용하여 질문 분석 (의도, 엔티티, 시간, 타겟 필드 통합 추출)"""
         
-        prompt = f"""제조 현장 질문을 분석하여 JSON으로 답하세요.
-        질문: "{question}"
+        system_instruction = """당신은 제조 현장(Smart Factory)의 데이터 분석 전문가입니다. 
+사용자의 질문을 분석하여 JSON 형식으로 의도를 추출해야 합니다.
 
-        질문 유형:
-        - PRODUCTION_QUERY: 생산량, 생산 이력, 제품
-        - ABNORMAL_QUERY: 알람, 에러, 불량, 이상
-        - RAW_SENSOR_QUERY: 센서, 가동, CT, 부하
-        - TOOL_QUERY: 공구 정보, 사용량
-        - MACHINE_QUERY: 설비 정보, 임계치
-        - USER_QUERY: 사용자 정보
+질문 유형(primary_type):
+- PRODUCTION_QUERY: 생산량, 생산 이력, 제품 정보, 사이클 타임(CT) 등 생산 관련
+- ABNORMAL_QUERY: 알람, 에러, 불량, 이상 징후, 고장 내역 등
+- RAW_SENSOR_QUERY: 실시간 센서(부하, 속도), 가동 상태, 가동 시간/률 등
+- TOOL_QUERY: 공구(Tool) 정보, 공구 수명, 공구 사용량 등
+- MACHINE_QUERY: 설비 마스터 정보, 임계치(Threshold) 설정 등
+- USER_QUERY: 사용자 계정, 권한 정보 등
+- GREETING: 인사말, 자기소개 요청 등
+- DOCUMENT_QUERY: 위의 범주에 해당하지 않는 일반적인 매뉴얼이나 가이드 질문
 
-        엔티티 (있으면):
-        - machine_id: 설비 코드
-        - product_no: 생산 번호
-        - tool_code: 공구 번호
+시간 범위(time_range):
+- 질문에 언급된 시간을 "24h", "7d", "30d", "1h" 등의 형식으로 추출하세요.
+- 언급이 없으면 "24h"를 기본값으로 사용하세요.
 
-        시간: "24h"(기본), "7d", "30d" 등
+엔티티(entities):
+- machine_id: 설비 코드 (예: M01, CNC-01)
+- product_no: 제품 번호 또는 로트 번호
+- tool_code: 공구 번호 (예: T01)
 
-        JSON만 출력:
-        {{
-        "primary_type": "QUERY_TYPE",
-        "secondary_types": [],
-        "entities": {{}},
-        "time_range": "24h"
-        }}"""
+반드시 다음 JSON 구조로만 응답하세요:
+{
+  "primary_type": "유형",
+  "secondary_types": ["보조유형"],
+  "entities": {"machine_id": null, "product_no": null, "tool_code": null},
+  "time_range": "24h",
+  "sensor_query_type": "CURRENT_STATUS | RUNNING_STATS | RAW_STATS | TREND | RUNTIME | CT_STATS | null",
+  "target_field": "조회대상필드명(예: Load, Run, CT, Feed)"
+}"""
+
+        user_prompt = f"질문: \"{question}\""
 
         
 
         try:
-            if hasattr(self.gemini_service, 'model') and self.gemini_service.model:
+            if hasattr(self.gemini_service, 'client') and self.gemini_service.client:
                 def analyze():
-                    response = self.gemini_service.model.generate_content(prompt)
+                    # JSON 모드 및 시스템 프롬프트 적용을 위한 설정
+                    from google.genai import types
                     
-                    # Gemini 응답 텍스트 추출 (candidates 처리)
+                    # 새로운 모델 인스턴스 생성 (시스템 지침 포함) 또는 
+                    # 현재 SDK 버전에 맞게 컨텐츠 구성
+                    # 시스템 프롬프트를 텍스트 파트 앞에 추가하는 방식이 호환성이 높음
+                    full_prompt = f"{system_instruction}\n\n{user_prompt}"
+                    
+                    config = types.GenerateContentConfig(
+                        temperature=0.1,
+                        response_mime_type="application/json"
+                    )
+                    
+                    response = self.gemini_service.client.models.generate_content(
+                        model=self.gemini_service.model_name,
+                        contents=full_prompt,
+                        config=config
+                    )
+                    
                     # Gemini 응답 텍스트 추출 (candidates 처리)
                     try:
                         text = self.gemini_service._extract_text_from_response(response)

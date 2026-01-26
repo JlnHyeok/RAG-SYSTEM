@@ -7,7 +7,7 @@ sentence-transformers==2.2.2  # 임베딩 모델
 transformers==4.36.0
 torch==2.1.0
 huggingface-hub==0.19.4       # sentence-transformers 호환 버전
-google-generativeai==0.3.0    # Gemini API
+google-genai    # Gemini API (New SDK)
 
 # 벡터 데이터베이스
 qdrant-client==1.7.0
